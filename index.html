@@ -1,0 +1,1937 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rapprochement SIAP / ÉVOLUTION - V4 Consolidation + Géographie 500 m</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.2.0/turf.min.js"></script>
+
+  <style>
+    :root { --prestaterre: #06402B; }
+    body { background: radial-gradient(circle at top left, rgba(6,64,43,.08), transparent 30%), #f7f9f8; }
+    .drop-zone { transition: all .2s ease; }
+    .drop-zone.dragover { border-color: var(--prestaterre); background: #eef7f2; transform: translateY(-2px); }
+    .progress-inner { transition: width .18s ease; }
+    th { position: sticky; top: 0; z-index: 2; }
+    .table-wrapper { max-height: 60vh; }
+    .mono { font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body class="min-h-screen text-slate-800">
+<main class="max-w-[1900px] mx-auto p-5 md:p-8">
+
+  <section class="mb-7">
+    <div class="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-4">
+      <div>
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-green-50 text-green-900 text-xs font-semibold mb-3">
+          V4 • CONSOLIDATION SIAP + SIREN + RNB + CADASTRE + GÉOGRAPHIE 500 m
+        </div>
+        <h1 class="text-3xl md:text-4xl font-bold tracking-tight text-[#06402B]">Rapprochement SIAP / ÉVOLUTION</h1>
+        <p class="mt-2 text-slate-500 max-w-5xl">
+          Le moteur consolide d’abord le SIAP à 1 ligne par NUMERO_SIAP, puis génère largement les candidats par SIREN, commune et rayon géographique jusqu’à 500 m avant de scorer séparément adresse, rue, maître d’ouvrage, opération, logements, bâtiments, surface, RNB et cadastre.
+        </p>
+      </div>
+      <div class="text-sm text-slate-500 xl:text-right">
+        <div>Confiance</div>
+        <div class="font-bold text-[#06402B]">≥ 85 : automatique</div>
+        <div class="font-semibold text-amber-700">70–84 : probable • 50–69 : candidat</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
+    <div id="dropSiap" class="drop-zone bg-white border-2 border-dashed border-slate-300 rounded-2xl p-7 cursor-pointer shadow-sm hover:border-[#06402B]">
+      <input id="fileSiap" type="file" accept=".xlsx,.xls,.xlsm" class="hidden" />
+      <div class="flex items-start gap-4">
+        <div class="w-12 h-12 rounded-xl bg-green-50 flex items-center justify-center text-[#06402B] font-bold">1</div>
+        <div class="min-w-0 flex-1">
+          <div class="text-xs uppercase tracking-wider font-bold text-[#06402B] mb-1">Fichier SIAP</div>
+          <h2 class="text-xl font-semibold">Nettoyage automatique → SIREN + adresse + RNB / cadastre</h2>
+          <p class="text-sm text-slate-500 mt-1">Glissez le fichier ici. Les lignes ayant le même NUMERO_SIAP seront automatiquement regroupées avant tout traitement.</p>
+          <div id="siapFileInfo" class="mt-4 hidden rounded-xl bg-green-50 border border-green-100 p-3">
+            <div id="siapFileName" class="font-semibold text-sm text-green-900 truncate"></div>
+            <div id="siapFileRows" class="text-xs text-green-700 mt-1"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="dropEval" class="drop-zone bg-white border-2 border-dashed border-slate-300 rounded-2xl p-7 cursor-pointer shadow-sm hover:border-[#06402B]">
+      <input id="fileEval" type="file" accept=".xlsx,.xls,.xlsm" class="hidden" />
+      <div class="flex items-start gap-4">
+        <div class="w-12 h-12 rounded-xl bg-green-50 flex items-center justify-center text-[#06402B] font-bold">2</div>
+        <div class="min-w-0 flex-1">
+          <div class="text-xs uppercase tracking-wider font-bold text-[#06402B] mb-1">Fichier ÉVOLUTION</div>
+          <h2 class="text-xl font-semibold">Parcelles → cadastre / RNB</h2>
+          <p class="text-sm text-slate-500 mt-1">Les listes, parcelles partielles et plages du type « 17 à 21 » sont interprétées automatiquement.</p>
+          <div id="evalFileInfo" class="mt-4 hidden rounded-xl bg-green-50 border border-green-100 p-3">
+            <div id="evalFileName" class="font-semibold text-sm text-green-900 truncate"></div>
+            <div id="evalFileRows" class="text-xs text-green-700 mt-1"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 mb-6">
+    <div class="flex flex-col xl:flex-row xl:items-center gap-5">
+      <div class="flex flex-wrap gap-3">
+        <button id="runButton" disabled class="px-6 py-3 rounded-xl bg-[#06402B] text-white font-semibold hover:bg-green-900 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-sm">Lancer le rapprochement V4</button>
+        <button id="exportButton" disabled class="px-6 py-3 rounded-xl border border-[#06402B] text-[#06402B] font-semibold hover:bg-green-50 disabled:opacity-40 disabled:cursor-not-allowed transition">Exporter en Excel</button>
+      </div>
+      <div class="flex-1">
+        <div class="flex justify-between gap-4 text-xs text-slate-500 mb-2">
+          <span id="progressText">En attente des fichiers</span>
+          <span id="progressPercent" class="mono">0 %</span>
+        </div>
+        <div class="h-3 rounded-full bg-slate-100 overflow-hidden"><div id="progressBar" class="progress-inner h-full rounded-full bg-[#06402B]" style="width:0%"></div></div>
+      </div>
+    </div>
+    <div class="mt-4 text-xs text-slate-500">
+      Les fichiers Excel restent dans votre navigateur. La V4 consolide le SIAP puis interroge les services publics Annuaire des Entreprises, Géoplateforme / IGN et RNB. Les recherches géographiques sont élargies progressivement jusqu’à 500 m.
+    </div>
+    <div id="errorBox" class="hidden mt-4 p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm whitespace-pre-wrap"></div>
+    <div id="warningBox" class="hidden mt-4 p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-sm whitespace-pre-wrap"></div>
+  </section>
+
+  <section id="statsSection" class="hidden grid grid-cols-2 md:grid-cols-4 xl:grid-cols-11 gap-4 mb-6">
+    <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm"><div class="text-xs uppercase tracking-wider text-slate-400 font-semibold">SIAP brut</div><div id="statSiapRaw" class="text-3xl font-bold mt-2">0</div><div class="text-xs text-slate-400 mt-1">lignes chargées</div></div>
+    <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm"><div class="text-xs uppercase tracking-wider text-slate-400 font-semibold">SIAP unique</div><div id="statSiapUnique" class="text-3xl font-bold mt-2 text-[#06402B]">0</div><div class="text-xs text-slate-400 mt-1">NUMERO_SIAP consolidés</div></div>
+    <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm"><div class="text-xs uppercase tracking-wider text-slate-400 font-semibold">Regroupées</div><div id="statSiapGrouped" class="text-3xl font-bold mt-2 text-sky-700">0</div><div class="text-xs text-slate-400 mt-1">lignes évitées</div></div>
+    <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm"><div class="text-xs uppercase tracking-wider text-slate-400 font-semibold">ÉVOLUTION</div><div id="statTotal" class="text-3xl font-bold mt-2">0</div><div class="text-xs text-slate-400 mt-1">lignes analysées</div></div>
+    <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm"><div class="text-xs uppercase tracking-wider text-slate-400 font-semibold">Automatiques</div><div id="statAuto" class="text-3xl font-bold mt-2 text-green-700">0</div><div class="text-xs text-slate-400 mt-1">score ≥ 85</div></div>
+    <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm"><div class="text-xs uppercase tracking-wider text-slate-400 font-semibold">Probables</div><div id="statProbable" class="text-3xl font-bold mt-2 text-amber-700">0</div><div class="text-xs text-slate-400 mt-1">score 70–84</div></div>
+    <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm"><div class="text-xs uppercase tracking-wider text-slate-400 font-semibold">Candidats</div><div id="statCandidate" class="text-3xl font-bold mt-2 text-orange-700">0</div><div class="text-xs text-slate-400 mt-1">score 50–69</div></div>
+    <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm"><div class="text-xs uppercase tracking-wider text-slate-400 font-semibold">Même RNB</div><div id="statRnb" class="text-3xl font-bold mt-2 text-violet-700">0</div><div class="text-xs text-slate-400 mt-1">bâtiment commun</div></div>
+    <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm"><div class="text-xs uppercase tracking-wider text-slate-400 font-semibold">Lien parcellaire</div><div id="statParcel" class="text-3xl font-bold mt-2 text-[#06402B]">0</div><div class="text-xs text-slate-400 mt-1">identique / voisin / proche</div></div>
+    <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm"><div class="text-xs uppercase tracking-wider text-slate-400 font-semibold">SIREN commun</div><div id="statSirenMatch" class="text-3xl font-bold mt-2 text-indigo-700">0</div><div class="text-xs text-slate-400 mt-1">meilleur candidat</div></div>
+    <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm"><div class="text-xs uppercase tracking-wider text-slate-400 font-semibold">Score moyen</div><div id="statAverage" class="text-3xl font-bold mt-2 text-[#06402B]">0 %</div><div class="text-xs text-slate-400 mt-1">meilleurs candidats</div></div>
+  </section>
+
+  <section class="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+    <div class="p-5 border-b border-slate-200">
+      <div class="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
+        <div>
+          <h2 class="font-semibold text-lg">Résultats du rapprochement</h2>
+          <p class="text-sm text-slate-500 max-w-5xl">Cliquez sur un en-tête de colonne pour trier. Les filtres s’appliquent instantanément sans relancer le rapprochement.</p>
+        </div>
+        <button id="resetFilters" class="px-4 py-2 rounded-xl border border-slate-300 text-sm font-semibold hover:bg-slate-50">Réinitialiser les filtres</button>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-7 gap-3 mt-4">
+        <input id="searchInput" type="text" placeholder="Recherche libre..." class="px-3 py-2 border border-slate-300 rounded-xl text-sm focus:outline-none focus:border-[#06402B]" />
+        <select id="statusFilter" class="px-3 py-2 border border-slate-300 rounded-xl text-sm bg-white">
+          <option value="all">Tous les niveaux</option><option value="auto">Automatiques ≥ 85</option><option value="probable">Probables 70–84</option><option value="candidate">Candidats 50–69</option><option value="unmatched">Faibles &lt; 50</option>
+        </select>
+        <select id="evidenceFilter" class="px-3 py-2 border border-slate-300 rounded-xl text-sm bg-white">
+          <option value="all">Toutes les preuves</option><option value="rnb">Même RNB</option><option value="parcelExact">Parcelle identique</option><option value="parcelAdjacent">Parcelle adjacente</option><option value="parcelNear">Parcelle proche</option><option value="siren">Même SIREN</option><option value="geo">À ≤ 500 m</option>
+        </select>
+        <select id="distanceFilter" class="px-3 py-2 border border-slate-300 rounded-xl text-sm bg-white">
+          <option value="all">Toutes distances</option><option value="25">≤ 25 m</option><option value="50">≤ 50 m</option><option value="100">≤ 100 m</option><option value="250">≤ 250 m</option><option value="500">≤ 500 m</option>
+        </select>
+        <select id="sirenFilter" class="px-3 py-2 border border-slate-300 rounded-xl text-sm bg-white"><option value="all">SIREN : tous</option><option value="yes">SIREN commun</option><option value="no">SIREN différent / absent</option></select>
+        <input id="minScoreFilter" type="number" min="0" max="100" step="1" placeholder="Score min." class="px-3 py-2 border border-slate-300 rounded-xl text-sm" />
+        <select id="methodFilter" class="px-3 py-2 border border-slate-300 rounded-xl text-sm bg-white"><option value="all">Toutes méthodes</option></select>
+      </div>
+    </div>
+
+    <div class="table-wrapper overflow-auto">
+      <table class="min-w-full text-sm">
+        <thead class="bg-slate-50 border-b border-slate-200">
+          <tr class="text-left text-xs uppercase tracking-wide text-slate-500">
+            <th data-sort="levelRank" class="sortable px-4 py-3 whitespace-nowrap cursor-pointer select-none">Niveau ↕</th>
+            <th data-sort="score" class="sortable px-4 py-3 whitespace-nowrap cursor-pointer select-none">Score ↕</th>
+            <th data-sort="method" class="sortable px-4 py-3 whitespace-nowrap cursor-pointer select-none">Méthode ↕</th>
+            <th data-sort="distance" class="sortable px-4 py-3 whitespace-nowrap cursor-pointer select-none">Distance ↕</th>
+            <th data-sort="parcelRelationRank" class="sortable px-4 py-3 whitespace-nowrap cursor-pointer select-none">Parcelles ↕</th>
+            <th data-sort="sirenMatch" class="sortable px-4 py-3 whitespace-nowrap cursor-pointer select-none">SIREN ↕</th>
+            <th data-sort="evalId" class="sortable px-4 py-3 whitespace-nowrap cursor-pointer select-none">Code interne ↕</th>
+            <th data-sort="evalOwner" class="sortable px-4 py-3 min-w-[220px] cursor-pointer select-none">MO ÉVOLUTION ↕</th>
+            <th data-sort="evalOperation" class="sortable px-4 py-3 min-w-[260px] cursor-pointer select-none">Opération ÉVOLUTION ↕</th>
+            <th data-sort="siapId" class="sortable px-4 py-3 whitespace-nowrap cursor-pointer select-none">NUMERO_SIAP ↕</th>
+            <th data-sort="siapSourceRows" class="sortable px-4 py-3 whitespace-nowrap cursor-pointer select-none">Lignes SIAP ↕</th>
+            <th data-sort="siapOwner" class="sortable px-4 py-3 min-w-[220px] cursor-pointer select-none">MO SIAP ↕</th>
+            <th data-sort="siapOperation" class="sortable px-4 py-3 min-w-[260px] cursor-pointer select-none">Opération SIAP ↕</th>
+            <th data-sort="streetScore" class="sortable px-4 py-3 min-w-[300px] cursor-pointer select-none">Adresse / rue SIAP ↕</th>
+            <th data-sort="businessScore" class="sortable px-4 py-3 min-w-[260px] cursor-pointer select-none">Détail score ↕</th>
+          </tr>
+        </thead>
+        <tbody id="resultsBody" class="divide-y divide-slate-100"><tr><td colspan="15" class="px-6 py-16 text-center text-slate-400">Chargez les deux fichiers Excel pour commencer.</td></tr></tbody>
+      </table>
+    </div>
+    <div id="tableFooter" class="hidden px-5 py-3 border-t border-slate-200 text-xs text-slate-500"></div>
+  </section>
+</main>
+
+<script>
+(() => {
+  "use strict";
+
+  const AUTO_THRESHOLD = 85;
+  const PROBABLE_THRESHOLD = 70;
+  const CANDIDATE_THRESHOLD = 50;
+  const MAX_RANGE_EXPANSION = 250;
+  const GEO_CONCURRENCY = 8;
+  const PARCEL_CONCURRENCY = 8;
+  const RNB_CONCURRENCY = 6;
+  const RNB_MIN_ADDRESS_SCORE = 0.55;
+  const RNB_CLOSEST_RADIUS_M = 100;
+  const COMPANY_MIN_CANDIDATE_CONFIDENCE = 62;
+  const COMPANY_STRONG_CONFIDENCE = 84;
+  const ADDRESS_PARCEL_RADIUS_M = 50;
+  const MAX_GEO_CANDIDATE_RADIUS_M = 500;
+
+  const API = {
+    geocode: "https://data.geopf.fr/geocodage/search",
+    postalCommunes: "https://apicarto.ign.fr/api/codes-postaux/communes/",
+    parcel: "https://apicarto.ign.fr/api/cadastre/parcelle",
+    rnb: "https://rnb-api.beta.gouv.fr/api/alpha/buildings",
+    companySearch: "https://recherche-entreprises.api.gouv.fr/search"
+  };
+
+  const EXPECTED = {
+    SIAP: {
+      id: ["NUMERO_SIAP", "Numero SIAP", "Numéro SIAP"],
+      postal: ["COMMUNE_CODE_POSTAL", "CODE_POSTAL", "Code postal"],
+      owner: ["MAITRISE_OUVRAGE_NOM_OFFICIEL", "Maîtrise d'ouvrage", "Maitre d'ouvrage"],
+      operation: ["NOM_OPERATION", "Nom de l'opération", "Nom opération"],
+      address: ["ADRESSE_OPERATION", "Adresse de l'opération", "Adresse opération", "Adresse"],
+      siren: ["SIREN", "CODE_SIREN", "Code SIREN", "SIREN_MOA", "SIREN MOA", "MAITRISE_OUVRAGE_SIREN", "SIREN_MAITRISE_OUVRAGE", "Maîtrise d'ouvrage: SIREN", "Maitre d'ouvrage: SIREN"],
+      totalLogements: ["TOTAL_LOGEMENTS", "Total logements", "Nombre de logements", "Nb logements"],
+      totalBatiments: ["TOTAL_BATIMENTS", "Total bâtiments", "Nombre de bâtiments", "Nb bâtiments"],
+      surface: ["SURFACE", "Surface de référence", "SHAB", "SDP"],
+      referential: ["REFERENTIEL", "Référentiel", "Référentiel: Nom du référentiel"],
+      regulation: ["REGLEMENTATION", "Réglementation"],
+      date: ["DATE_OPERATION", "Date de création", "Date"],
+      type: ["TYPE_OPERATION", "Type d'opération", "Ouvrage", "Nature des travaux"]
+    },
+    EVAL: {
+      id: ["Évaluation: Opération: Code interne", "Code interne"],
+      postal: ["Évaluation: Opération: Code postal", "Code postal"],
+      owner: ["Évaluation: Opération: Maître d'ouvrage: Nom de la société", "Maître d'ouvrage: Nom de la société"],
+      operation: ["Évaluation: Opération: Affaire: Nom de l'affaire", "Affaire: Nom de l'affaire", "Nom de l'opération (interne)", "Nom du programme (client)"],
+      address: ["Évaluation: Opération: Adresse", "Adresse de l'opération", "Adresse opération", "Adresse"],
+      siren: ["Évaluation: Opération: Maître d'ouvrage: SIREN", "Maître d'ouvrage: SIREN", "SIREN", "Code SIREN"],
+      section: [
+        "Évaluation: Opération: N° de section de(s) parcelle(s) et",
+        "Évaluation: Opération: N° de section de(s) parcelle(s)",
+        "N° de section de(s) parcelle(s)"
+      ],
+      parcels: ["Évaluation: Opération: N° de(s) parcelle(s)", "N° de(s) parcelle(s)"],
+      totalLogements: ["Total logements", "Évaluation: Opération: Total logements"],
+      totalBatiments: ["Total bâtiments", "Évaluation: Opération: Total bâtiments"],
+      surface: ["Surface de référence / SHAB retenue", "Surface de référence", "SHAB", "SDP"],
+      referential: ["Référentiel: Nom du référentiel", "Évaluation: Opération: Référentiel: Nom du référentiel", "Référentiel"],
+      regulation: ["Réglementation", "Évaluation: Opération: Réglementation"],
+      date: ["Évaluation: Date de création", "Affaire: Accepté le", "Contrat: Date d'activation", "Date de création"],
+      type: ["Ouvrage", "Nature des travaux", "Type d'opération"]
+    }
+  };
+
+  const CORE_FIELDS = {
+    SIAP: ["id", "postal", "owner", "operation", "address"],
+    EVAL: ["id", "postal", "owner", "operation", "section", "parcels"]
+  };
+
+  let rawSiapRows = [];
+  let rawEvalRows = [];
+  let siapRows = [];
+  let evalRows = [];
+  let results = [];
+  let columns = { SIAP: {}, EVAL: {} };
+  let missingColumns = { SIAP: [], EVAL: [] };
+  let warningMessages = [];
+  let siapConsolidationStats = { raw: 0, unique: 0, grouped: 0, missingId: 0 };
+  let sortState = { key: "score", dir: "desc" };
+
+  const geocodeCache = new Map();
+  const postalCache = new Map();
+  const parcelCache = new Map();
+  const siapParcelPointCache = new Map();
+  const rnbAddressCache = new Map();
+  const rnbClosestCache = new Map();
+  const rnbPlotCache = new Map();
+  const rnbDetailCache = new Map();
+  const companySearchCache = new Map();
+  let companyNextSlot = 0;
+  let companyErrorCount = 0;
+  let rnbNextSlot = 0;
+  let rnbErrorCount = 0;
+
+  const els = Object.fromEntries([
+    "dropSiap","dropEval","fileSiap","fileEval","siapFileInfo","evalFileInfo","siapFileName","evalFileName","siapFileRows","evalFileRows",
+    "runButton","exportButton","progressBar","progressText","progressPercent","errorBox","warningBox","statsSection","statSiapRaw","statSiapUnique","statSiapGrouped","statTotal","statAuto","statProbable","statCandidate","statRnb","statParcel","statSirenMatch","statAverage","resultsBody","tableFooter","searchInput","statusFilter","evidenceFilter","distanceFilter","sirenFilter","minScoreFilter","methodFilter","resetFilters"
+  ].map(id => [id, document.getElementById(id)]));
+
+  function normalizeHeader(v) {
+    return String(v ?? "").replace(/^\uFEFF/, "").replace(/\u00A0/g, " ").replace(/\s+/g, " ").trim();
+  }
+
+  function normalizeText(value) {
+    return String(value ?? "")
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase().replace(/['’`´]/g, " ").replace(/&/g, " et ")
+      .replace(/\b(sas|sasu|sarl|eurl|sa|sci|scic|sem|spl|snc|groupe|societe|societe anonyme|habitat)\b/g, " ")
+      .replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  }
+
+  function headerKey(v) { return normalizeText(normalizeHeader(v)).replace(/\s+/g, " "); }
+
+  function normalizeOperationText(value) {
+    return normalizeText(value)
+      .replace(/\b(construction|rehabilitation|renovation|residence|programme|operation|logements?|logts?|immeuble|batiments?|lotissement|projet|phase|tranche)\b/g, " ")
+      .replace(/\s+/g, " ").trim();
+  }
+
+  function parseAddressParts(value) {
+    const raw = String(value ?? "");
+    const n = normalizeText(raw);
+    const numberMatch = n.match(/\b(\d{1,4})\s*(bis|ter|quater|b|t)?\b/);
+    const houseNumber = numberMatch ? numberMatch[1] : "";
+    const suffix = numberMatch?.[2] || "";
+    let street = n
+      .replace(/\b\d{5}\b/g, " ")
+      .replace(/\b\d{1,4}\s*(bis|ter|quater|b|t)?\b/, " ")
+      .replace(/\b(rue|avenue|av|boulevard|bd|route|chemin|impasse|allee|place|quai|cours|passage|square|residence|lotissement|lieu dit|ld)\b/g, " ")
+      .replace(/\s+/g, " ").trim();
+    return { houseNumber, suffix, street, normalized: n };
+  }
+
+  function numericTokens(value) {
+    return [...new Set((String(value ?? "").match(/\b\d{1,4}\b/g) || []).filter(x => Number(x) > 0))];
+  }
+
+  function modeRepresentative(values, normalizer = normalizeText) {
+    const filtered = values.filter(v => String(v ?? "").trim() !== "");
+    if (!filtered.length) return "";
+    const groups = new Map();
+    for (const v of filtered) {
+      const key = normalizer(v) || String(v).trim().toLowerCase();
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(v);
+    }
+    return [...groups.values()].sort((a,b) => b.length - a.length || String(b[0]).length - String(a[0]).length)[0]
+      .sort((a,b) => String(b).length - String(a).length)[0];
+  }
+
+  function smartNumericAggregate(values, kind) {
+    const nums = values.map(parseNumberValue).filter(Number.isFinite);
+    if (!nums.length) return null;
+    const rounded = nums.map(n => Math.round(n * 1000) / 1000);
+    const counts = new Map();
+    for (const n of rounded) counts.set(n, (counts.get(n) || 0) + 1);
+    const best = [...counts.entries()].sort((a,b) => b[1] - a[1] || b[0] - a[0])[0];
+    if (best && best[1] >= 2) return best[0];
+    // Pour des champs intitulés "total", la valeur maximale est plus sûre que la somme
+    // lorsque plusieurs lignes décrivent des typologies d'une même opération.
+    return Math.max(...nums);
+  }
+
+  function uniqueJoined(values, max = 6) {
+    const out = [];
+    const seen = new Set();
+    for (const v of values) {
+      const s = String(v ?? "").trim();
+      const k = normalizeText(s);
+      if (!s || !k || seen.has(k)) continue;
+      seen.add(k); out.push(s);
+      if (out.length >= max) break;
+    }
+    return out.join(" ; ");
+  }
+
+  function normalizePostalCode(value) {
+    if (value === null || value === undefined || value === "") return "";
+    if (typeof value === "number" && Number.isFinite(value)) return String(Math.round(value)).padStart(5, "0").slice(-5);
+    let text = String(value).trim().replace(/\u00A0/g, " ");
+    if (/^\d{4,5}[.,]0+$/.test(text)) text = text.split(/[.,]/)[0];
+    const match = text.match(/(?:^|\D)(\d{5})(?:\D|$)/);
+    if (match) return match[1];
+    const digits = text.replace(/\D/g, "");
+    return digits ? digits.slice(0, 5).padStart(5, "0") : "";
+  }
+
+  function semanticHeaderMatch(key, field) {
+    if (field === "section") return key.includes("section") && key.includes("parcelle");
+    if (field === "parcels") return key.includes("parcelle") && !key.includes("section") && (key.includes("numero") || key.includes("n de") || key.includes("n parcelle"));
+    if (field === "totalLogements") return (key.includes("total") || key.includes("nombre") || key.includes("nb")) && key.includes("logement");
+    if (field === "totalBatiments") return (key.includes("total") || key.includes("nombre") || key.includes("nb")) && key.includes("batiment");
+    if (field === "surface") return key.includes("surface") || key === "shab" || key.includes("surface shab") || key === "sdp";
+    if (field === "referential") return key.includes("referentiel");
+    if (field === "regulation") return key.includes("reglementation");
+    if (field === "type") return key.includes("ouvrage") || key.includes("nature des travaux") || key.includes("type operation");
+    if (field === "address") return key.includes("adresse") && !key.includes("mail");
+    if (field === "postal") return key.includes("code postal");
+    if (field === "owner") return key.includes("maitre") && key.includes("ouvrage") && (key.includes("nom") || key.includes("societe"));
+    if (field === "siren") return key.includes("siren") && !key.includes("siret");
+    if (field === "operation") return key.includes("nom") && (key.includes("operation") || key.includes("affaire") || key.includes("programme"));
+    if (field === "id") return key.includes("code interne") || key.includes("numero siap");
+    if (field === "date") return key.includes("date") && (key.includes("creation") || key.includes("accepte") || key.includes("activation") || key.includes("decision"));
+    return false;
+  }
+
+  function resolveColumn(headers, aliases, field) {
+    const normalized = headers.map(h => ({ original: h, key: headerKey(h) }));
+    for (const alias of aliases) {
+      const exact = normalized.find(x => x.key === headerKey(alias));
+      if (exact) return exact.original;
+    }
+    const semantic = normalized.find(x => semanticHeaderMatch(x.key, field));
+    return semantic ? semantic.original : null;
+  }
+
+  function mapColumns(rows, type) {
+    if (!rows.length) throw new Error(`Le fichier ${type} ne contient aucune ligne exploitable.`);
+    const headers = Object.keys(rows[0]);
+    const mapped = {};
+    for (const [field, aliases] of Object.entries(EXPECTED[type])) mapped[field] = resolveColumn(headers, aliases, field);
+    missingColumns[type] = CORE_FIELDS[type].filter(field => !mapped[field]);
+    return mapped;
+  }
+
+  function valueAt(row, column) { return column ? (row[column] ?? "") : ""; }
+
+  function normalizeSiren(value) {
+    const digits = String(value ?? "").replace(/\D/g, "");
+    if (digits.length === 9) return digits;
+    if (digits.length === 14) return digits.slice(0, 9);
+    const m = String(value ?? "").match(/(?:^|\D)(\d{9})(?:\D|$)/);
+    return m ? m[1] : "";
+  }
+
+  function canonicalizeObjectKeys(row) {
+    const out = {};
+    for (const [k, v] of Object.entries(row)) out[normalizeHeader(k)] = v;
+    return out;
+  }
+
+  function parseNumberValue(v) {
+    if (v === null || v === undefined || v === "") return null;
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    let s = String(v).trim().replace(/\u00A0/g, " ");
+    const match = s.replace(/\s/g, "").match(/-?\d+(?:[.,]\d+)?/);
+    if (!match) return null;
+    const n = Number(match[0].replace(",", "."));
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function parseDateValue(v) {
+    if (v === null || v === undefined || v === "") return null;
+    if (v instanceof Date && !Number.isNaN(v.getTime())) return v.getTime();
+    if (typeof v === "number" && Number.isFinite(v)) {
+      if (v > 20000 && v < 80000) return Math.round((v - 25569) * 86400 * 1000);
+      if (v > 100000000000) return v;
+    }
+    const s = String(v).trim();
+    const fr = s.match(/\b(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\b/);
+    if (fr) {
+      let y = Number(fr[3]); if (y < 100) y += y >= 70 ? 1900 : 2000;
+      const d = new Date(y, Number(fr[2]) - 1, Number(fr[1]));
+      return Number.isNaN(d.getTime()) ? null : d.getTime();
+    }
+    const t = Date.parse(s);
+    return Number.isNaN(t) ? null : t;
+  }
+
+  function normalizeSectionToken(token) {
+    const t = String(token || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!t || ["ET","DE","LA","LE","LES","P"].includes(t)) return "";
+    if (t.length === 1) return `0${t}`;
+    return t.slice(0, 2);
+  }
+
+  function parseSections(raw) {
+    let text = String(raw ?? "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, " ");
+    text = text.replace(/\b(SECTIONS?|PARCELLES?|CADASTR(?:E|AL|ALE|ALES)?|NUMERO|NO|N°|DE|DES|DU|LA|LE|LES|ET)\b/g, " ");
+    const tokens = text.split(/[^A-Z0-9]+/).map(x => x.trim()).filter(Boolean);
+    const out = [];
+    for (const token of tokens) {
+      if (token.length > 2) continue;
+      const sec = normalizeSectionToken(token);
+      if (sec && !out.includes(sec)) out.push(sec);
+    }
+    return out;
+  }
+
+  function parcel4(n) {
+    const digits = String(n ?? "").replace(/\D/g, "");
+    if (!digits) return "";
+    return digits.padStart(4, "0").slice(-4);
+  }
+
+  function parseParcels(raw) {
+    let text = String(raw ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    text = text.replace(/[–—]/g, "-").replace(/\b(a|au)\b/g, "-").replace(/\b(et)\b/g, ",");
+    const parts = text.split(/[;,/\n]+/).map(s => s.trim()).filter(Boolean);
+    const found = [];
+    const seen = new Set();
+
+    function add(num, partial, source) {
+      const n = parcel4(num);
+      if (!n) return;
+      const key = `${n}|${partial ? 1 : 0}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        found.push({ number: n, partial: !!partial, source });
+      }
+    }
+
+    for (const part of parts) {
+      const range = part.match(/(?:n\s*[°o]?\s*)?(\d{1,4})\s*-\s*(\d{1,4})/i);
+      if (range) {
+        const a = Number(range[1]), b = Number(range[2]);
+        if (Number.isFinite(a) && Number.isFinite(b) && b >= a && (b - a + 1) <= MAX_RANGE_EXPANSION) {
+          for (let n = a; n <= b; n++) add(n, /\bp\b|\d+p\b/.test(part), part);
+          continue;
+        }
+      }
+      const matches = [...part.matchAll(/(\d{1,4})\s*(p)?\b/gi)];
+      for (const m of matches) add(m[1], !!m[2], part);
+    }
+    return found;
+  }
+
+  function formatCadastre(sections, parcels) {
+    if (!sections.length && !parcels.length) return "";
+    const p = parcels.map(x => `${Number(x.number)}${x.partial ? "p" : ""}`).join(", ");
+    return `${sections.join(" / ")}${p ? " • " + p : ""}`;
+  }
+
+  function buildPreparedRows() {
+    const groups = new Map();
+    let missingId = 0;
+    rawSiapRows.forEach((row, index) => {
+      const rawId = String(valueAt(row, columns.SIAP.id) ?? "").trim();
+      const key = rawId ? `ID:${rawId}` : `ROW:${index}`;
+      if (!rawId) missingId++;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push({ row, index });
+    });
+
+    siapRows = [...groups.values()].map((entries, consolidatedIndex) => {
+      const rows = entries.map(x => x.row);
+      const first = rows[0];
+      const id = modeRepresentative(rows.map(r => valueAt(r, columns.SIAP.id)), v => String(v).trim()) || `SIAP_SANS_ID_${entries[0].index + 1}`;
+      const postal = normalizePostalCode(modeRepresentative(rows.map(r => valueAt(r, columns.SIAP.postal)), normalizePostalCode));
+      const owner = modeRepresentative(rows.map(r => valueAt(r, columns.SIAP.owner)));
+      const operation = modeRepresentative(rows.map(r => valueAt(r, columns.SIAP.operation)));
+      const address = modeRepresentative(rows.map(r => valueAt(r, columns.SIAP.address)));
+      const siren = normalizeSiren(modeRepresentative(rows.map(r => valueAt(r, columns.SIAP.siren)), normalizeSiren));
+      const addressParts = parseAddressParts(address);
+      return {
+        index: consolidatedIndex, original: first, sourceRowsOriginal: rows, sourceRowIndexes: entries.map(x => x.index), sourceRowCount: rows.length,
+        id, postal, owner, operation, address, siren,
+        ownerN: normalizeText(owner), operationN: normalizeOperationText(operation), addressN: normalizeText(address), combinedN: normalizeText(`${owner} ${operation}`),
+        addressParts, operationNumbers: numericTokens(operation),
+        totalLogements: smartNumericAggregate(rows.map(r => valueAt(r, columns.SIAP.totalLogements)), "logements"),
+        totalBatiments: smartNumericAggregate(rows.map(r => valueAt(r, columns.SIAP.totalBatiments)), "buildings"),
+        surface: smartNumericAggregate(rows.map(r => valueAt(r, columns.SIAP.surface)), "surface"),
+        referential: uniqueJoined(rows.map(r => valueAt(r, columns.SIAP.referential))),
+        regulation: uniqueJoined(rows.map(r => valueAt(r, columns.SIAP.regulation))),
+        date: Math.min(...rows.map(r => parseDateValue(valueAt(r, columns.SIAP.date))).filter(Number.isFinite), Infinity),
+        type: uniqueJoined(rows.map(r => valueAt(r, columns.SIAP.type))),
+        geo: null,
+        parcelFeatures: [], parcelKeys: new Set(), parcelKeysExact: new Set(), parcelKeysNearby: new Set(), parcelLabels: [], plotIds: new Set(), parcelLookupMode: "",
+        rnbAddressIds: new Set(), rnbClosest: new Map(), rnbIds: new Set(), rnbPlotIds: new Set(), rnbAddressScore: null, rnbAddressStatus: ""
+      };
+    });
+    for (const s of siapRows) if (s.date === Infinity) s.date = null;
+    siapConsolidationStats = { raw: rawSiapRows.length, unique: siapRows.length, grouped: Math.max(0, rawSiapRows.length - siapRows.length), missingId };
+
+    evalRows = rawEvalRows.map((row, index) => {
+      const sectionRaw = valueAt(row, columns.EVAL.section);
+      const parcelRaw = valueAt(row, columns.EVAL.parcels);
+      const sections = parseSections(sectionRaw);
+      const parcels = parseParcels(parcelRaw);
+      const id = valueAt(row, columns.EVAL.id);
+      const postal = normalizePostalCode(valueAt(row, columns.EVAL.postal));
+      const owner = valueAt(row, columns.EVAL.owner);
+      const operation = valueAt(row, columns.EVAL.operation);
+      const address = valueAt(row, columns.EVAL.address);
+      const sirenDirect = normalizeSiren(valueAt(row, columns.EVAL.siren));
+      const addressParts = parseAddressParts(address);
+      return {
+        index, original: row, id, postal, owner, operation, address, sirenDirect,
+        ownerN: normalizeText(owner), operationN: normalizeOperationText(operation), addressN: normalizeText(address), combinedN: normalizeText(`${owner} ${operation}`),
+        addressParts, operationNumbers: numericTokens(operation),
+        totalLogements: parseNumberValue(valueAt(row, columns.EVAL.totalLogements)),
+        totalBatiments: parseNumberValue(valueAt(row, columns.EVAL.totalBatiments)),
+        surface: parseNumberValue(valueAt(row, columns.EVAL.surface)),
+        referential: valueAt(row, columns.EVAL.referential), regulation: valueAt(row, columns.EVAL.regulation), date: parseDateValue(valueAt(row, columns.EVAL.date)), type: valueAt(row, columns.EVAL.type),
+        sections, parcels, cadastreLabel: formatCadastre(sections, parcels), geo: null,
+        companyCandidates: [], sirenBest: sirenDirect ? { siren: sirenDirect, name: owner, confidence: 100, direct: true, ambiguous: false } : null,
+        sirenCandidates: sirenDirect ? [{ siren: sirenDirect, name: owner, confidence: 100, direct: true, ambiguous: false }] : [],
+        parcelFeatures: [], parcelCityCodes: new Set(), parcelKeys: new Set(), plotIds: new Set(), candidateCityCodes: [], rnbIds: new Set(), rnbCover: new Map()
+      };
+    });
+  }
+
+  function appendWarning(message) {
+    if (!message || warningMessages.includes(message)) return;
+    warningMessages.push(message);
+    els.warningBox.textContent = warningMessages.join("\n\n");
+    els.warningBox.classList.remove("hidden");
+  }
+
+  function showColumnWarnings() {
+    for (const type of ["SIAP", "EVAL"]) {
+      const missing = missingColumns[type] || [];
+      if (!missing.length) continue;
+      const labels = missing.map(k => EXPECTED[type][k][0]);
+      appendWarning(`Fichier ${type} : colonne(s) non détectée(s) : ${labels.join(" ; ")}\nLe fichier est accepté : le moteur utilisera automatiquement les critères encore disponibles.`);
+    }
+  }
+
+  async function readExcelFile(file, type) {
+    clearError();
+    const ab = await file.arrayBuffer();
+    const wb = XLSX.read(ab, { type: "array", cellDates: false, raw: true });
+    if (!wb.SheetNames.length) throw new Error("Le classeur ne contient aucune feuille.");
+    const sheetName = wb.SheetNames[0];
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: "", raw: true }).map(canonicalizeObjectKeys);
+    if (!rows.length) throw new Error(`Le fichier ${type} ne contient aucune donnée.`);
+
+    if (type === "SIAP") {
+      rawSiapRows = rows;
+      columns.SIAP = mapColumns(rows, "SIAP");
+      if (!columns.SIAP.siren) appendWarning("Fichier SIAP : aucune colonne SIREN détectée. La V4 fonctionnera quand même, mais le nouveau critère SIREN ne pourra pas être utilisé. Noms reconnus : SIREN, Code SIREN, SIREN_MOA, SIREN MOA, MAITRISE_OUVRAGE_SIREN, etc.");
+      els.siapFileName.textContent = file.name;
+      {
+        const ids = columns.SIAP.id ? rows.map(r => String(valueAt(r, columns.SIAP.id) ?? "").trim()).filter(Boolean) : [];
+        const unique = new Set(ids).size;
+        els.siapFileRows.textContent = `${formatNumber(rows.length)} ligne(s) brutes${unique ? ` • ~${formatNumber(unique)} NUMERO_SIAP uniques` : ""} • feuille : ${sheetName}`;
+      }
+      els.siapFileInfo.classList.remove("hidden");
+    } else {
+      rawEvalRows = rows;
+      columns.EVAL = mapColumns(rows, "EVAL");
+      els.evalFileName.textContent = file.name;
+      els.evalFileRows.textContent = `${formatNumber(rows.length)} ligne(s) • feuille : ${sheetName}`;
+      els.evalFileInfo.classList.remove("hidden");
+    }
+    showColumnWarnings();
+    updateRunButton();
+  }
+
+  function configureDropZone(drop, input, type) {
+    drop.addEventListener("click", () => input.click());
+    input.addEventListener("change", async e => { const f = e.target.files?.[0]; if (f) await handleFile(f, type); });
+    ["dragenter","dragover"].forEach(name => drop.addEventListener(name, e => { e.preventDefault(); e.stopPropagation(); drop.classList.add("dragover"); }));
+    ["dragleave","drop"].forEach(name => drop.addEventListener(name, e => { e.preventDefault(); e.stopPropagation(); drop.classList.remove("dragover"); }));
+    drop.addEventListener("drop", async e => { const f = e.dataTransfer.files?.[0]; if (f) await handleFile(f, type); });
+  }
+
+  async function handleFile(file, type) {
+    if (!/\.(xlsx|xls|xlsm)$/i.test(file.name)) return showError("Veuillez sélectionner un fichier Excel .xlsx, .xls ou .xlsm.");
+    try {
+      setProgress(2, `Lecture du fichier ${type}...`);
+      await readExcelFile(file, type);
+      setProgress(0, rawSiapRows.length && rawEvalRows.length ? "Les deux fichiers sont prêts" : "En attente du second fichier");
+    } catch (err) {
+      console.error(err); showError(err.message || "Impossible de lire le fichier."); setProgress(0, "Erreur de lecture");
+    }
+  }
+
+  function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+  async function fetchJson(url, timeoutMs = 25000, retries = 1) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const res = await fetch(url, { signal: controller.signal, headers: { "Accept": "application/json" } });
+        if (res.status === 429 && attempt < retries) {
+          clearTimeout(timer);
+          await sleep(900 + attempt * 800);
+          continue;
+        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await res.json();
+      } catch (e) {
+        if (attempt >= retries) throw e;
+        await sleep(350 + attempt * 500);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    return null;
+  }
+
+  async function rnbFetchJson(url) {
+    const now = Date.now();
+    const target = Math.max(now, rnbNextSlot);
+    rnbNextSlot = target + 90;
+    if (target > now) await sleep(target - now);
+    try {
+      return await fetchJson(url, 30000, 2);
+    } catch (e) {
+      rnbErrorCount++;
+      console.warn("RNB indisponible", url, e);
+      return null;
+    }
+  }
+
+  async function companyFetchJson(url) {
+    const now = Date.now();
+    const target = Math.max(now, companyNextSlot);
+    // API publique : limite documentée 7 appels/s. On reste volontairement sous 6 appels/s.
+    companyNextSlot = target + 180;
+    if (target > now) await sleep(target - now);
+    try {
+      return await fetchJson(url, 25000, 2);
+    } catch (e) {
+      companyErrorCount++;
+      console.warn("API Recherche d'entreprises indisponible", url, e);
+      return null;
+    }
+  }
+
+  function companyResultName(item) {
+    return String(item?.nom_complet || item?.nom_raison_sociale || item?.nom || item?.sigle || "").trim();
+  }
+
+  function companyResultPostals(item) {
+    const set = new Set();
+    const push = v => { const p = normalizePostalCode(v); if (p) set.add(p); };
+    push(item?.siege?.code_postal);
+    for (const e of (item?.matching_etablissements || [])) push(e?.code_postal || e?.adresse?.code_postal);
+    return [...set];
+  }
+
+  function companyResultCityCodes(item) {
+    const set = new Set();
+    const push = v => { const s = String(v || ""); if (/^\d{5}$/.test(s)) set.add(s); };
+    push(item?.siege?.commune || item?.siege?.code_commune);
+    for (const e of (item?.matching_etablissements || [])) push(e?.commune || e?.code_commune);
+    return [...set];
+  }
+
+  async function searchCompaniesByOwner(owner) {
+    const key = normalizeText(owner);
+    if (!key) return [];
+    if (companySearchCache.has(key)) return companySearchCache.get(key);
+    const params = new URLSearchParams({ q: String(owner).trim(), page: "1", per_page: "15" });
+    let out = [];
+    const json = await companyFetchJson(`${API.companySearch}?${params.toString()}`);
+    for (const item of (json?.results || [])) {
+      const siren = normalizeSiren(item?.siren);
+      if (!siren) continue;
+      out.push({
+        siren,
+        name: companyResultName(item),
+        sigle: String(item?.sigle || ""),
+        state: String(item?.etat_administratif || ""),
+        postals: companyResultPostals(item),
+        cityCodes: companyResultCityCodes(item),
+        address: String(item?.siege?.adresse || ""),
+        rawScore: Number(item?.score)
+      });
+    }
+    const uniq = new Map();
+    for (const c of out) if (!uniq.has(c.siren)) uniq.set(c.siren, c);
+    out = [...uniq.values()];
+    companySearchCache.set(key, out);
+    return out;
+  }
+
+  function rankCompanyCandidates(ev, rawCandidates) {
+    if (ev.sirenDirect) return [{ siren: ev.sirenDirect, name: ev.owner, confidence: 100, direct: true, ambiguous: false }];
+    if (!ev.ownerN) return [];
+    const ranked = [];
+    for (const c of rawCandidates || []) {
+      const nameScore = Math.max(similarity(ev.owner, c.name), c.sigle ? similarity(ev.owner, c.sigle) : 0);
+      let confidence = nameScore;
+      const ownerN = normalizeText(ev.owner), nameN = normalizeText(c.name), sigleN = normalizeText(c.sigle);
+      if (ownerN && (ownerN === nameN || ownerN === sigleN)) confidence = 100;
+      else if (ownerN.length >= 5 && nameN.includes(ownerN)) confidence = Math.max(confidence, 90);
+      else if (nameN.length >= 5 && ownerN.includes(nameN)) confidence = Math.max(confidence, 88);
+      if (ev.postal && c.postals.includes(ev.postal)) confidence += 6;
+      if (ev.candidateCityCodes?.some(code => c.cityCodes.includes(code))) confidence += 6;
+      if (c.state && !["A", "ACTIF", "ACTIVE"].includes(c.state.toUpperCase())) confidence -= 5;
+      confidence = Math.max(0, Math.min(100, Math.round(confidence)));
+      if (confidence >= COMPANY_MIN_CANDIDATE_CONFIDENCE) ranked.push({ ...c, confidence, nameScore });
+    }
+    ranked.sort((a,b) => b.confidence - a.confidence || b.nameScore - a.nameScore);
+    const top = ranked[0], second = ranked[1];
+    const ambiguous = !!(top && second && top.siren !== second.siren && (top.confidence - second.confidence) <= 5);
+    return ranked.slice(0, 6).map((c,i) => ({ ...c, ambiguous: ambiguous && i < 2 }));
+  }
+
+  async function geocodeAddress(address, postal) {
+    const key = `${postal}|${normalizeText(address)}`;
+    if (geocodeCache.has(key)) return geocodeCache.get(key);
+    if (!normalizeText(address)) { geocodeCache.set(key, null); return null; }
+    const params = new URLSearchParams({ q: `${address} ${postal}`.trim(), limit: "1", index: "address" });
+    if (postal) params.set("postcode", postal);
+    let value = null;
+    try {
+      const json = await fetchJson(`${API.geocode}?${params.toString()}`);
+      const f = json?.features?.[0];
+      if (f?.geometry?.coordinates?.length >= 2) {
+        value = {
+          lon: Number(f.geometry.coordinates[0]), lat: Number(f.geometry.coordinates[1]),
+          label: f.properties?.label || "", score: Number(f.properties?.score || 0),
+          citycode: String(f.properties?.citycode || ""), postcode: String(f.properties?.postcode || ""),
+          banId: String(f.properties?.id || f.properties?.ban_id || "")
+        };
+      }
+    } catch (e) { console.warn("Géocodage adresse impossible", address, e); }
+    geocodeCache.set(key, value);
+    return value;
+  }
+
+  function extractCityCodes(json) {
+    const items = Array.isArray(json) ? json : (json?.features || json?.communes || json?.results || []);
+    const out = [];
+    for (const item of items) {
+      const p = item?.properties || item || {};
+      const candidates = [p.codeCommune, p.code_commune, p.codeInsee, p.code_insee, p.code, p.insee, p.citycode];
+      const code = candidates.find(v => /^\d{5}$/.test(String(v || "")));
+      if (code && !out.includes(String(code))) out.push(String(code));
+    }
+    return out;
+  }
+
+  async function getCityCodesForPostal(postal) {
+    if (!postal) return [];
+    if (postalCache.has(postal)) return postalCache.get(postal);
+    let codes = [];
+    try {
+      const json = await fetchJson(`${API.postalCommunes}${encodeURIComponent(postal)}`);
+      codes = extractCityCodes(json);
+    } catch (e) { console.warn("Codes communes indisponibles", postal, e); }
+    postalCache.set(postal, codes);
+    return codes;
+  }
+
+  async function fetchParcel(codeInsee, section, number) {
+    const key = `${codeInsee}|${section}|${number}`;
+    if (parcelCache.has(key)) return parcelCache.get(key);
+    const params = new URLSearchParams({ code_insee: codeInsee, section, numero: number, source_ign: "PCI" });
+    let features = [];
+    try {
+      const json = await fetchJson(`${API.parcel}?${params.toString()}`);
+      features = (json?.features || []).filter(f => f?.geometry);
+    } catch (e) { console.warn("Parcelle introuvable", key, e); }
+    parcelCache.set(key, features);
+    return features;
+  }
+
+  function firstProp(p, names) {
+    const obj = p || {};
+    const lower = new Map(Object.entries(obj).map(([k,v]) => [String(k).toLowerCase(), v]));
+    for (const n of names) {
+      const direct = obj[n];
+      const v = direct !== undefined ? direct : lower.get(String(n).toLowerCase());
+      if (v !== undefined && v !== null && String(v).trim() !== "") return String(v).trim();
+    }
+    return "";
+  }
+
+  function parcelIdentityFromFeature(feature, fallbackCity = "") {
+    const p = feature?.properties || {};
+    let city = firstProp(p, ["code_insee","codeInsee","code_commune","codeCommune","insee","citycode"]);
+    let section = firstProp(p, ["section","code_section","codeSection"]);
+    let number = firstProp(p, ["numero","numero_parcelle","num_parcelle","numeroParcelle","parcelle"]);
+    const fullId = firstProp(p, ["idu","idu_parcel","id","id_parcelle","idParcelle","code"]);
+    const compact = fullId.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    if ((!city || !section || !number) && compact.length >= 11) {
+      if (!city && /^\d{5}/.test(compact)) city = compact.slice(0,5);
+      if (!number && /\d{4}$/.test(compact)) number = compact.slice(-4);
+      if (!section && compact.length >= 6) section = compact.slice(-6,-4);
+    }
+    city = /^\d{5}$/.test(city) ? city : (/^\d{5}$/.test(fallbackCity) ? fallbackCity : "");
+    section = normalizeSectionToken(section);
+    number = parcel4(number);
+    if (!city || !section || !number) return null;
+    return { city, section, number, key: `${city}|${section}|${number}`, label: `${city} • ${section} ${Number(number)}` };
+  }
+
+  function buildRnbPlotId(city, section, number, comAbs = "000") {
+    const c = /^\d{5}$/.test(String(city || "")) ? String(city) : "";
+    const s = normalizeSectionToken(section);
+    const n = parcel4(number);
+    let a = String(comAbs || "000").replace(/\D/g, "").padStart(3, "0").slice(-3);
+    if (!c || !s || !n) return "";
+    return `${c}${a}${s}${n}`;
+  }
+
+  function plotIdFromFeature(feature, fallbackCity = "") {
+    const p = feature?.properties || {};
+    const raw = firstProp(p, ["idu","idu_parcel","id_parcelle","idParcelle","id","code"]);
+    const compact = raw.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    if (/^\d{8}[A-Z0-9]{2}\d{4}$/.test(compact)) return compact;
+    const ident = parcelIdentityFromFeature(feature, fallbackCity);
+    if (!ident) return "";
+    const comAbs = firstProp(p, ["com_abs","comAbs","code_com_abs","codeCommuneAbsorbee"]) || "000";
+    return buildRnbPlotId(ident.city, ident.section, ident.number, comAbs);
+  }
+
+  function parseRnbPlotId(plotId) {
+    const compact = String(plotId || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    if (!/^\d{8}[A-Z0-9]{2}\d{4}$/.test(compact)) return null;
+    const city = compact.slice(0,5), section = compact.slice(8,10), number = compact.slice(10,14);
+    return { city, section, number, key: `${city}|${section}|${number}`, label: `${city} • ${section} ${Number(number)}` };
+  }
+
+  async function fetchParcelsByGeometry(geometry) {
+    const params = new URLSearchParams({ geom: JSON.stringify(geometry), source_ign: "PCI" });
+    try {
+      const json = await fetchJson(`${API.parcel}?${params.toString()}`, 30000, 1);
+      return (json?.features || []).filter(f => f?.geometry);
+    } catch (e) { console.warn("Recherche parcellaire par géométrie impossible", e); return []; }
+  }
+
+  async function fetchParcelsAtAddressPoint(geo) {
+    if (!geo || !Number.isFinite(geo.lon) || !Number.isFinite(geo.lat)) return { features: [], mode: "" };
+    const key = `${geo.citycode || ""}|${geo.lon.toFixed(6)}|${geo.lat.toFixed(6)}`;
+    if (siapParcelPointCache.has(key)) return siapParcelPointCache.get(key);
+    let features = await fetchParcelsByGeometry({ type: "Point", coordinates: [geo.lon, geo.lat] });
+    let mode = features.length ? "exact" : "";
+    if (!features.length) {
+      try {
+        const buffer = turf.buffer(turf.point([geo.lon, geo.lat]), ADDRESS_PARCEL_RADIUS_M, { units: "meters", steps: 5 });
+        features = await fetchParcelsByGeometry(buffer.geometry);
+        mode = features.length ? `nearby${ADDRESS_PARCEL_RADIUS_M}` : "";
+      } catch (e) { console.warn("Buffer parcellaire SIAP impossible", e); }
+    }
+    const result = { features, mode };
+    siapParcelPointCache.set(key, result);
+    return result;
+  }
+
+  function addParcelFeatures(target, features, fallbackCity, mode = "exact") {
+    const labels = new Set(target.parcelLabels || []);
+    for (const f of features || []) {
+      const ident = parcelIdentityFromFeature(f, fallbackCity);
+      if (ident) {
+        target.parcelKeys.add(ident.key);
+        if (target.parcelKeysExact && mode === "exact") target.parcelKeysExact.add(ident.key);
+        if (target.parcelKeysNearby && mode !== "exact") target.parcelKeysNearby.add(ident.key);
+        labels.add(ident.label);
+      }
+      const plotId = plotIdFromFeature(f, fallbackCity);
+      if (plotId && target.plotIds) target.plotIds.add(plotId);
+    }
+    if (target.parcelLabels) target.parcelLabels = [...labels];
+  }
+
+  function collectionItems(json) {
+    if (!json) return [];
+    if (Array.isArray(json)) return json;
+    const directKeys = ["results","items","features","buildings","data"];
+    for (const key of directKeys) {
+      const node = json[key];
+      if (Array.isArray(node)) return node;
+      if (node && typeof node === "object") {
+        for (const nestedKey of ["results","items","features","buildings","data"]) {
+          if (Array.isArray(node[nestedKey])) return node[nestedKey];
+        }
+      }
+    }
+    // Fallback tolerant aux evolutions mineures du schema RNB : on cherche
+    // une collection d'objets contenant des identifiants de batiment.
+    const queue = [{ node: json, depth: 0 }];
+    while (queue.length) {
+      const { node, depth } = queue.shift();
+      if (!node || depth > 3 || typeof node !== "object") continue;
+      for (const value of Object.values(node)) {
+        if (Array.isArray(value)) {
+          if (value.some(x => x && typeof x === "object" && extractRnbId(x))) return value;
+        } else if (value && typeof value === "object") queue.push({ node: value, depth: depth + 1 });
+      }
+    }
+    return [];
+  }
+
+  function unwrapRnbItem(item) {
+    if (!item || typeof item !== "object") return {};
+    return item.building || item.properties?.building || item.properties || item;
+  }
+
+  function extractRnbId(item) {
+    const candidates = [
+      item?.rnb_id, item?.rnbId, item?.id,
+      item?.properties?.rnb_id, item?.properties?.rnbId, item?.properties?.id,
+      item?.building?.rnb_id, item?.building?.id,
+      item?.properties?.building?.rnb_id, item?.properties?.building?.id
+    ];
+    const value = candidates.find(v => v !== undefined && v !== null && String(v).trim());
+    return value ? String(value).trim() : "";
+  }
+
+  function extractRnbDistance(item) {
+    const candidates = [item?.distance, item?.distance_m, item?.distanceMeters, item?.properties?.distance, item?.properties?.distance_m];
+    for (const v of candidates) {
+      const n = Number(v); if (Number.isFinite(n)) return n;
+    }
+    return Infinity;
+  }
+
+  function extractRnbCover(item) {
+    const candidates = [item?.bdg_cover_ratio, item?.cover_ratio, item?.coverage, item?.properties?.bdg_cover_ratio, item?.properties?.cover_ratio];
+    for (const v of candidates) {
+      const n = Number(v); if (Number.isFinite(n)) return n;
+    }
+    return null;
+  }
+
+  function extractPointFromRnb(item) {
+    const x = unwrapRnbItem(item);
+    const point = x?.point || item?.point || item?.properties?.point;
+    const coords = point?.coordinates || item?.geometry?.coordinates;
+    if (Array.isArray(coords) && coords.length >= 2 && Number.isFinite(Number(coords[0])) && Number.isFinite(Number(coords[1]))) {
+      return { lon: Number(coords[0]), lat: Number(coords[1]) };
+    }
+    return null;
+  }
+
+  function extractPlotsFromRnb(item) {
+    const x = unwrapRnbItem(item);
+    const arrays = [x?.plots, item?.plots, item?.properties?.plots].filter(Array.isArray);
+    const out = [];
+    for (const arr of arrays) {
+      for (const p of arr) {
+        const id = typeof p === "string" ? p : (p?.id || p?.plot_id || p?.plotId || "");
+        if (id) out.push({ id: String(id), cover: Number(p?.bdg_cover_ratio ?? p?.cover_ratio ?? NaN) });
+      }
+    }
+    return out;
+  }
+
+  async function fetchRnbByAddress(address, postal, banKey = "") {
+    const key = `${postal}|${normalizeText(address)}|${banKey || ""}`;
+    if (rnbAddressCache.has(key)) return rnbAddressCache.get(key);
+    if (!normalizeText(address)) {
+      const empty = { ids: [], items: [], status: "no_address", geocodeScore: null };
+      rnbAddressCache.set(key, empty); return empty;
+    }
+    const params = new URLSearchParams();
+    if (/^\d{5}_.+/.test(String(banKey || ""))) params.set("cle_interop_ban", String(banKey));
+    else { params.set("q", `${address}${postal ? `, ${postal}` : ""}`); params.set("min_score", String(RNB_MIN_ADDRESS_SCORE)); }
+    const json = await rnbFetchJson(`${API.rnb}/address/?${params.toString()}`);
+    const items = collectionItems(json);
+    const ids = [...new Set(items.map(extractRnbId).filter(Boolean))];
+    const scoreCandidates = [json?.geocoding_score, json?.geocodingScore, json?.score, json?.geocoding?.score];
+    const scoreRaw = scoreCandidates.find(v => Number.isFinite(Number(v)));
+    const result = { ids, items, status: String(json?.status || ""), geocodeScore: scoreRaw === undefined ? null : Number(scoreRaw) };
+    rnbAddressCache.set(key, result);
+    return result;
+  }
+
+  async function fetchRnbClosest(geo) {
+    if (!geo || !Number.isFinite(geo.lat) || !Number.isFinite(geo.lon)) return [];
+    const key = `${geo.lat.toFixed(6)}|${geo.lon.toFixed(6)}|${RNB_CLOSEST_RADIUS_M}`;
+    if (rnbClosestCache.has(key)) return rnbClosestCache.get(key);
+    const params = new URLSearchParams({ point: `${geo.lat},${geo.lon}`, radius: String(RNB_CLOSEST_RADIUS_M) });
+    const json = await rnbFetchJson(`${API.rnb}/closest/?${params.toString()}`);
+    const items = collectionItems(json).slice(0, 12);
+    const out = items.map(item => {
+      const id = extractRnbId(item);
+      let distance = extractRnbDistance(item);
+      if (!Number.isFinite(distance)) {
+        const p = extractPointFromRnb(item);
+        if (p) distance = haversineMeters(geo.lat, geo.lon, p.lat, p.lon);
+      }
+      return { id, distance, item };
+    }).filter(x => x.id);
+    rnbClosestCache.set(key, out);
+    return out;
+  }
+
+  async function fetchRnbByPlot(plotId) {
+    const id = String(plotId || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    if (!id) return [];
+    if (rnbPlotCache.has(id)) return rnbPlotCache.get(id);
+    const json = await rnbFetchJson(`${API.rnb}/plot/${encodeURIComponent(id)}/`);
+    const items = collectionItems(json);
+    const out = items.map(item => ({ id: extractRnbId(item), cover: extractRnbCover(item), item })).filter(x => x.id);
+    rnbPlotCache.set(id, out);
+    return out;
+  }
+
+  async function fetchRnbDetail(rnbId) {
+    const id = String(rnbId || "").trim();
+    if (!id) return null;
+    if (rnbDetailCache.has(id)) return rnbDetailCache.get(id);
+    const json = await rnbFetchJson(`${API.rnb}/${encodeURIComponent(id)}/?withPlots=1`);
+    rnbDetailCache.set(id, json || null);
+    return json || null;
+  }
+
+  function haversineMeters(lat1, lon1, lat2, lon2) {
+    const R = 6371000;
+    const toRad = d => d * Math.PI / 180;
+    const p1 = toRad(lat1), p2 = toRad(lat2), dp = toRad(lat2-lat1), dl = toRad(lon2-lon1);
+    const a = Math.sin(dp/2)**2 + Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2;
+    return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
+
+  async function mapConcurrent(items, concurrency, worker, onProgress) {
+    let cursor = 0, done = 0;
+    const output = new Array(items.length);
+    async function run() {
+      while (true) {
+        const i = cursor++;
+        if (i >= items.length) return;
+        try { output[i] = await worker(items[i], i); } catch (e) { output[i] = null; console.warn(e); }
+        done++;
+        if (onProgress) onProgress(done, items.length);
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(concurrency, Math.max(1, items.length)) }, run));
+    return output;
+  }
+
+  function tokenDice(a, b) {
+    const A = new Set(normalizeText(a).split(" ").filter(Boolean));
+    const B = new Set(normalizeText(b).split(" ").filter(Boolean));
+    if (!A.size && !B.size) return 100;
+    if (!A.size || !B.size) return 0;
+    let inter = 0; for (const x of A) if (B.has(x)) inter++;
+    return Math.round(200 * inter / (A.size + B.size));
+  }
+
+  function bigramDice(a, b) {
+    a = normalizeText(a).replace(/\s+/g, " "); b = normalizeText(b).replace(/\s+/g, " ");
+    if (a === b && a) return 100;
+    if (a.length < 2 || b.length < 2) return 0;
+    const counts = new Map();
+    for (let i = 0; i < a.length - 1; i++) { const g = a.slice(i,i+2); counts.set(g, (counts.get(g)||0)+1); }
+    let inter = 0;
+    for (let i = 0; i < b.length - 1; i++) { const g = b.slice(i,i+2), c = counts.get(g)||0; if (c>0) { inter++; counts.set(g,c-1); } }
+    return Math.round(200 * inter / ((a.length-1)+(b.length-1)));
+  }
+
+  function similarity(a, b) {
+    if (!normalizeText(a) || !normalizeText(b)) return 0;
+    return Math.round(.58 * tokenDice(a,b) + .42 * bigramDice(a,b));
+  }
+
+  function geometryDistance(point, geometry) {
+    try {
+      const pt = turf.point([point.lon, point.lat]);
+      const feature = { type: "Feature", properties: {}, geometry };
+      if ((geometry.type === "Polygon" || geometry.type === "MultiPolygon") && turf.booleanPointInPolygon(pt, feature)) return { distance: 0, inside: true };
+      let min = Infinity;
+      const polygons = geometry.type === "Polygon" ? [geometry.coordinates] : geometry.type === "MultiPolygon" ? geometry.coordinates : [];
+      for (const poly of polygons) {
+        for (const ring of poly) {
+          if (!ring || ring.length < 2) continue;
+          const d = turf.pointToLineDistance(pt, turf.lineString(ring), { units: "meters" });
+          if (Number.isFinite(d) && d < min) min = d;
+        }
+      }
+      return { distance: min, inside: false };
+    } catch (e) { return { distance: Infinity, inside: false }; }
+  }
+
+  function bestGeoAgainstParcels(siap, parcelFeatures) {
+    if (!siap.geo || !parcelFeatures.length) return { distance: Infinity, inside: false, feature: null };
+    let best = { distance: Infinity, inside: false, feature: null };
+    for (const f of parcelFeatures) {
+      const d = geometryDistance(siap.geo, f.geometry);
+      if (d.distance < best.distance) best = { ...d, feature: f };
+      if (d.inside) return best;
+    }
+    return best;
+  }
+
+  function geoScore(distance, inside) {
+    if (inside) return 100;
+    if (!Number.isFinite(distance)) return 0;
+    if (distance <= 10) return 99;
+    if (distance <= 25) return 96;
+    if (distance <= 50) return 91;
+    if (distance <= 100) return 84;
+    if (distance <= 200) return 75;
+    if (distance <= 500) return 62;
+    if (distance <= 1000) return 48;
+    if (distance <= 2500) return 28;
+    if (distance <= 5000) return 10;
+    return 0;
+  }
+
+  function numericCloseness(a, b, kind) {
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+    const diff = Math.abs(a-b);
+    if (kind === "buildings") {
+      if (diff === 0) return 100; if (diff === 1) return 75; if (diff === 2) return 45; return 5;
+    }
+    if (kind === "logements") {
+      if (diff === 0) return 100;
+      const base = Math.max(Math.abs(a), Math.abs(b), 1), rel = diff/base;
+      if (diff <= 1 || rel <= .03) return 95; if (rel <= .08) return 85; if (rel <= .15) return 70; if (rel <= .25) return 50; return 10;
+    }
+    const base = Math.max(Math.abs(a), Math.abs(b), 1), rel = diff/base;
+    if (rel <= .03) return 100; if (rel <= .07) return 90; if (rel <= .15) return 75; if (rel <= .25) return 55; if (rel <= .40) return 30; return 5;
+  }
+
+  function dateCloseness(a, b) {
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+    const days = Math.abs(a-b) / 86400000;
+    if (days <= 30) return 100; if (days <= 90) return 90; if (days <= 180) return 80; if (days <= 365) return 65; if (days <= 730) return 40; return 10;
+  }
+
+  function businessScores(ev, s) {
+    const criteria = [];
+    const add = (name, value, weight) => {
+      if (value === null || value === undefined || !Number.isFinite(Number(value))) return;
+      criteria.push({ name, value: Math.max(0, Math.min(100, Number(value))), weight });
+    };
+    const sirenInfo = commonSirenInfo(ev, s);
+    if (sirenInfo.match) add("siren", Math.max(78, sirenInfo.confidence), 25);
+    if (ev.ownerN && s.ownerN) add("owner", similarity(ev.owner, s.owner), 14);
+    if (ev.operationN && s.operationN) add("operation", similarity(ev.operationN, s.operationN), 17);
+    if (ev.addressN && s.addressN) add("address", similarity(ev.address, s.address), 9);
+    if (ev.addressParts?.street && s.addressParts?.street) add("street", similarity(ev.addressParts.street, s.addressParts.street), 14);
+    if (ev.addressParts?.houseNumber && s.addressParts?.houseNumber) add("houseNumber", ev.addressParts.houseNumber === s.addressParts.houseNumber ? 100 : 0, 8);
+    if (ev.postal && s.postal) add("postal", ev.postal === s.postal ? 100 : 0, 4);
+    if (ev.candidateCityCodes?.length && s.geo?.citycode) add("city", ev.candidateCityCodes.includes(s.geo.citycode) ? 100 : 0, 8);
+    add("logements", numericCloseness(ev.totalLogements, s.totalLogements, "logements"), 12);
+    add("batiments", numericCloseness(ev.totalBatiments, s.totalBatiments, "buildings"), 8);
+    add("surface", numericCloseness(ev.surface, s.surface, "surface"), 10);
+    if (normalizeText(ev.referential) && normalizeText(s.referential)) add("referential", similarity(ev.referential, s.referential), 3);
+    if (normalizeText(ev.regulation) && normalizeText(s.regulation)) add("regulation", similarity(ev.regulation, s.regulation), 3);
+    if (normalizeText(ev.type) && normalizeText(s.type)) add("type", similarity(ev.type, s.type), 4);
+    add("date", dateCloseness(ev.date, s.date), 4);
+
+    const evNums = new Set(ev.operationNumbers || []), sNums = new Set(s.operationNumbers || []);
+    if (evNums.size && sNums.size) {
+      const common = [...evNums].filter(x => sNums.has(x));
+      add("operationNumbers", common.length ? 100 : 0, 5);
+    }
+
+    const totalWeight = criteria.reduce((sum, c) => sum + c.weight, 0);
+    let score = totalWeight ? Math.round(criteria.reduce((sum, c) => sum + c.value*c.weight, 0) / totalWeight) : 0;
+    if (totalWeight < 20) score = Math.min(score, 58);
+    else if (totalWeight < 35) score = Math.min(score, 72);
+    else if (totalWeight < 50) score = Math.min(score, 84);
+    else score = Math.min(score, 94);
+    const byName = Object.fromEntries(criteria.map(c => [c.name, Math.round(c.value)]));
+    return { score, totalWeight, byName, criteria };
+  }
+
+  function commonSirenInfo(ev, s) {
+    if (!s?.siren) return { match: false, confidence: 0, candidate: null };
+    const direct = ev?.sirenDirect && ev.sirenDirect === s.siren;
+    if (direct) return { match: true, confidence: 100, candidate: { siren: s.siren, confidence: 100, direct: true } };
+    const candidates = ev?.sirenCandidates || [];
+    const candidate = candidates.find(c => c.siren === s.siren);
+    return candidate ? { match: true, confidence: candidate.confidence || 0, candidate } : { match: false, confidence: 0, candidate: null };
+  }
+
+  function commonParcelInfo(ev, s) {
+    const keys = [];
+    if (ev?.parcelKeys?.size && s?.parcelKeys?.size) for (const key of ev.parcelKeys) if (s.parcelKeys.has(key)) keys.push(key);
+    const exact = keys.some(k => s.parcelKeysExact?.has(k));
+    const nearbyExtracted = keys.length > 0 && !exact;
+    return { keys, exact, nearbyExtracted };
+  }
+
+  function flattenLineFeatures(feature) {
+    try {
+      const lines = turf.polygonToLine(feature);
+      if (!lines) return [];
+      if (lines.type === "FeatureCollection") return lines.features || [];
+      if (lines.type === "Feature") return [lines];
+    } catch (e) {}
+    return [];
+  }
+
+  function sampleCoords(feature, max = 70) {
+    const out = [];
+    const walk = c => {
+      if (!Array.isArray(c)) return;
+      if (c.length >= 2 && typeof c[0] === "number" && typeof c[1] === "number") out.push([c[0], c[1]]);
+      else for (const x of c) walk(x);
+    };
+    walk(feature?.geometry?.coordinates);
+    if (out.length <= max) return out;
+    const step = out.length / max;
+    return Array.from({length:max}, (_,i) => out[Math.floor(i*step)]);
+  }
+
+  function featureDistanceMeters(a, b) {
+    if (!a?.geometry || !b?.geometry) return Infinity;
+    try { if (turf.booleanIntersects(a, b)) return 0; } catch (e) {}
+    const linesA = flattenLineFeatures(a), linesB = flattenLineFeatures(b);
+    let best = Infinity;
+    const check = (coords, lines) => {
+      for (const coord of coords) for (const line of lines) {
+        try {
+          const d = turf.pointToLineDistance(turf.point(coord), line, { units: "kilometers" }) * 1000;
+          if (d < best) best = d;
+          if (best <= 1) return;
+        } catch (e) {}
+      }
+    };
+    check(sampleCoords(a), linesB); check(sampleCoords(b), linesA);
+    if (Number.isFinite(best)) return best;
+    try { return turf.distance(turf.centroid(a), turf.centroid(b), { units: "kilometers" }) * 1000; } catch (e) { return Infinity; }
+  }
+
+  function parcelRelationship(ev, s) {
+    const common = commonParcelInfo(ev, s);
+    if (common.exact) return { type: "identical", distance: 0, keys: common.keys, exact: true, rank: 4 };
+    if (common.keys.length) return { type: "same_reference_nearby", distance: 0, keys: common.keys, exact: false, rank: 4 };
+    if (!ev?.parcelFeatures?.length || !s?.parcelFeatures?.length) return { type: "none", distance: Infinity, keys: [], exact: false, rank: 0 };
+    let best = Infinity;
+    for (const a of ev.parcelFeatures) for (const b of s.parcelFeatures) {
+      const d = featureDistanceMeters(a, b);
+      if (d < best) best = d;
+      if (best === 0) break;
+    }
+    if (best <= 2) return { type: "adjacent", distance: best, keys: [], exact: false, rank: 3 };
+    if (best <= 25) return { type: "near25", distance: best, keys: [], exact: false, rank: 2 };
+    if (best <= 100) return { type: "near100", distance: best, keys: [], exact: false, rank: 1 };
+    if (best <= 500) return { type: "near500", distance: best, keys: [], exact: false, rank: 1 };
+    return { type: "none", distance: best, keys: [], exact: false, rank: 0 };
+  }
+
+  function commonRnbInfo(ev, s) {
+    const strong = [], near = [];
+    if (!ev?.rnbIds?.size) return { strong, near, minNearDistance: Infinity };
+    for (const id of s.rnbAddressIds || []) if (ev.rnbIds.has(id)) strong.push(id);
+    let minNearDistance = Infinity;
+    for (const [id, distance] of s.rnbClosest || []) {
+      if (!ev.rnbIds.has(id)) continue;
+      near.push(id);
+      if (Number.isFinite(distance) && distance < minNearDistance) minNearDistance = distance;
+    }
+    return { strong, near, minNearDistance };
+  }
+
+  function scoreCandidate(ev, s, geoInfo) {
+    const biz = businessScores(ev, s);
+    const g = geoScore(geoInfo.distance, geoInfo.inside);
+    const parcel = parcelRelationship(ev, s);
+    const rnb = commonRnbInfo(ev, s);
+    const siren = commonSirenInfo(ev, s);
+    let score = 0, method = "Critères métier / texte";
+
+    if (rnb.strong.length) {
+      score = 100; method = "Même bâtiment RNB";
+    } else if (parcel.type === "identical" || parcel.type === "same_reference_nearby") {
+      score = 100; method = "Parcelle cadastrale identique";
+    } else if (parcel.type === "adjacent" && siren.match) {
+      score = Math.max(95, Math.round(.45*95 + .25*biz.score + .20*siren.confidence + .10*g)); method = "Même SIREN + parcelles adjacentes";
+    } else if (siren.match && siren.confidence >= COMPANY_STRONG_CONFIDENCE && Number.isFinite(geoInfo.distance) && geoInfo.distance <= 100) {
+      score = Math.max(94, Math.round(.38*siren.confidence + .37*Math.max(85,g) + .25*biz.score)); method = "Même SIREN + proximité ≤ 100 m";
+    } else if (rnb.near.length && rnb.minNearDistance <= 100) {
+      const base = rnb.minNearDistance <= 10 ? 96 : rnb.minNearDistance <= 30 ? 92 : 86;
+      score = Math.min(98, Math.max(base, Math.round(.65*base + .35*biz.score))); method = "Bâtiment RNB proche / compatible";
+    } else if (parcel.type === "adjacent") {
+      score = Math.max(86, Math.round(.58*90 + .22*g + .20*biz.score)); method = "Parcelles adjacentes + critères concordants";
+    } else if ((parcel.type === "near25" || parcel.type === "near100") && siren.match) {
+      score = Math.max(84, Math.round(.35*siren.confidence + .35*g + .30*biz.score)); method = "Même SIREN + parcelles proches";
+    } else if (geoInfo.inside) {
+      score = Math.max(91, Math.round(.72*100 + .28*biz.score)); method = "Adresse SIAP dans une parcelle ÉVOLUTION";
+    } else if (siren.match && siren.confidence >= COMPANY_STRONG_CONFIDENCE && Number.isFinite(geoInfo.distance) && geoInfo.distance <= 500) {
+      score = Math.min(92, Math.max(76, Math.round(.32*siren.confidence + .33*g + .35*biz.score))); method = "Même SIREN + proximité ≤ 500 m";
+    } else if (Number.isFinite(geoInfo.distance) && geoInfo.distance <= 25) {
+      score = Math.max(76, Math.round(.55*g + .45*biz.score)); method = "Très proche ≤ 25 m + critères métier";
+    } else if (Number.isFinite(geoInfo.distance) && geoInfo.distance <= 100) {
+      score = Math.round(.48*g + .52*biz.score); method = "Proximité ≤ 100 m + critères métier";
+    } else if (Number.isFinite(geoInfo.distance) && geoInfo.distance <= 250) {
+      score = Math.round(.40*g + .60*biz.score); method = "Proximité ≤ 250 m + critères métier";
+    } else if (Number.isFinite(geoInfo.distance) && geoInfo.distance <= 500) {
+      score = Math.round(.33*g + .67*biz.score); method = "Proximité ≤ 500 m + critères métier";
+    } else if (siren.match && siren.confidence >= COMPANY_MIN_CANDIDATE_CONFIDENCE) {
+      score = Math.min(80, Math.max(biz.score, Math.round(.30*siren.confidence + .70*biz.score))); method = "Même SIREN + critères métier";
+    } else {
+      score = biz.score; method = biz.totalWeight >= 45 ? "Critères métier concordants" : "Texte / critères disponibles";
+    }
+
+    return {
+      score: Math.max(0, Math.min(100, Math.round(score))), method, businessScore: biz.score, businessWeight: biz.totalWeight, businessDetails: biz.byName,
+      geoScore: g, parcelMatch: parcel, rnbMatch: rnb, sirenMatch: siren, ...geoInfo
+    };
+  }
+
+  function formatParcelKey(key) {
+    const [city, section, number] = String(key || "").split("|");
+    if (!city || !section || !number) return key || "";
+    return `${city} • ${section} ${Number(number)}`;
+  }
+
+  function formatDistance(m, inside) {
+    if (inside) return "Dans la parcelle";
+    if (!Number.isFinite(m)) return "—";
+    if (m < 1000) return `${Math.round(m)} m`;
+    return `${(m/1000).toFixed(1).replace(".", ",")} km`;
+  }
+
+  function buildFuseIndexes() {
+    const postalGroups = new Map(), cityGroups = new Map(), ownerExact = new Map(), sirenGroups = new Map();
+    for (const s of siapRows) {
+      if (s.postal) { if (!postalGroups.has(s.postal)) postalGroups.set(s.postal, []); postalGroups.get(s.postal).push(s); }
+      if (s.geo?.citycode) { if (!cityGroups.has(s.geo.citycode)) cityGroups.set(s.geo.citycode, []); cityGroups.get(s.geo.citycode).push(s); }
+      if (s.ownerN) { if (!ownerExact.has(s.ownerN)) ownerExact.set(s.ownerN, []); ownerExact.get(s.ownerN).push(s); }
+      if (s.siren) { if (!sirenGroups.has(s.siren)) sirenGroups.set(s.siren, []); sirenGroups.get(s.siren).push(s); }
+    }
+    const options = { keys: ["combinedN","ownerN","operationN","addressN"], threshold: 1, includeScore: true, ignoreLocation: true, ignoreFieldNorm: true };
+    const postalFuse = new Map();
+    for (const [postal, rows] of postalGroups) postalFuse.set(postal, new Fuse(rows, options));
+    return { postalGroups, cityGroups, ownerExact, sirenGroups, postalFuse, allFuse: new Fuse(siapRows, options) };
+  }
+
+  function spatialKey(lon, lat, size=.01) { return `${Math.floor(lon/size)}|${Math.floor(lat/size)}`; }
+
+  function buildSpatialIndex() {
+    const size = .01, map = new Map();
+    for (const s of siapRows) {
+      if (!s.geo || !Number.isFinite(s.geo.lon) || !Number.isFinite(s.geo.lat)) continue;
+      const k = spatialKey(s.geo.lon, s.geo.lat, size);
+      if (!map.has(k)) map.set(k, []);
+      map.get(k).push(s);
+    }
+    return { size, map };
+  }
+
+  function evalReferenceBBox(ev) {
+    try {
+      if (ev.parcelFeatures?.length) return turf.bbox(turf.featureCollection(ev.parcelFeatures));
+    } catch (e) {}
+    if (ev.geo && Number.isFinite(ev.geo.lon) && Number.isFinite(ev.geo.lat)) return [ev.geo.lon, ev.geo.lat, ev.geo.lon, ev.geo.lat];
+    return null;
+  }
+
+  function nearbySiapWithinRadius(ev, spatial, radiusM = MAX_GEO_CANDIDATE_RADIUS_M) {
+    const bbox = evalReferenceBBox(ev);
+    if (!bbox) return [];
+    const lat = (bbox[1] + bbox[3]) / 2;
+    const dLat = radiusM / 111320;
+    const dLon = radiusM / Math.max(20000, 111320 * Math.cos(lat * Math.PI / 180));
+    const minLon = bbox[0] - dLon, maxLon = bbox[2] + dLon, minLat = bbox[1] - dLat, maxLat = bbox[3] + dLat;
+    const ix0 = Math.floor(minLon/spatial.size), ix1 = Math.floor(maxLon/spatial.size), iy0 = Math.floor(minLat/spatial.size), iy1 = Math.floor(maxLat/spatial.size);
+    const out = new Map();
+    for (let ix=ix0; ix<=ix1; ix++) for (let iy=iy0; iy<=iy1; iy++) {
+      for (const s of spatial.map.get(`${ix}|${iy}`) || []) out.set(s.index, s);
+    }
+    return [...out.values()];
+  }
+
+  function geoInfoForCandidate(ev, s) {
+    if (!s?.geo) return { distance: Infinity, inside: false, feature: null };
+    if (ev?.parcelFeatures?.length) return bestGeoAgainstParcels(s, ev.parcelFeatures);
+    if (ev?.geo && Number.isFinite(ev.geo.lat) && Number.isFinite(ev.geo.lon)) {
+      return { distance: haversineMeters(ev.geo.lat, ev.geo.lon, s.geo.lat, s.geo.lon), inside: false, feature: null };
+    }
+    return { distance: Infinity, inside: false, feature: null };
+  }
+
+  async function prepareGeodata() {
+    buildPreparedRows();
+    rnbErrorCount = 0;
+    companyErrorCount = 0;
+
+    const uniqueSiapAddresses = new Map();
+    for (const s of siapRows) {
+      const key = `${s.postal}|${s.addressN}`;
+      if (s.addressN && !uniqueSiapAddresses.has(key)) uniqueSiapAddresses.set(key, { address: s.address, postal: s.postal });
+    }
+    const siapAddressEntries = [...uniqueSiapAddresses.entries()];
+    const geoResults = await mapConcurrent(siapAddressEntries, GEO_CONCURRENCY, async ([key, v]) => [key, await geocodeAddress(v.address, v.postal)], (done,total) => {
+      setProgress(3 + Math.round(14*done/Math.max(1,total)), `Géocodage SIAP : ${done} / ${total}`);
+    });
+    const geoByAddress = new Map(geoResults.filter(Boolean));
+    for (const s of siapRows) {
+      s.geo = geoByAddress.get(`${s.postal}|${s.addressN}`) || null;
+      if (!s.postal && s.geo?.postcode) s.postal = normalizePostalCode(s.geo.postcode);
+    }
+
+    const uniqueGeo = new Map();
+    for (const s of siapRows) if (s.geo) {
+      const key = `${s.geo.citycode}|${s.geo.lon.toFixed(6)}|${s.geo.lat.toFixed(6)}`;
+      if (!uniqueGeo.has(key)) uniqueGeo.set(key, s.geo);
+    }
+    const geoEntries = [...uniqueGeo.entries()];
+    const parcelAtAddress = await mapConcurrent(geoEntries, PARCEL_CONCURRENCY, async ([key, geo]) => [key, await fetchParcelsAtAddressPoint(geo)], (done,total) => {
+      setProgress(17 + Math.round(13*done/Math.max(1,total)), `Cadastre depuis les adresses SIAP : ${done} / ${total}`);
+    });
+    const parcelsByGeo = new Map(parcelAtAddress.filter(Boolean));
+    for (const s of siapRows) if (s.geo) {
+      const key = `${s.geo.citycode}|${s.geo.lon.toFixed(6)}|${s.geo.lat.toFixed(6)}`;
+      const lookup = parcelsByGeo.get(key) || { features: [], mode: "" };
+      s.parcelFeatures = lookup.features || [];
+      s.parcelLookupMode = lookup.mode || "";
+      addParcelFeatures(s, s.parcelFeatures, s.geo.citycode || "", s.parcelLookupMode || "exact");
+    }
+
+    const rnbSiapResults = await mapConcurrent(siapAddressEntries, RNB_CONCURRENCY, async ([key, v]) => {
+      const geo = geoByAddress.get(key) || null;
+      const addressResult = await fetchRnbByAddress(v.address, v.postal, geo?.banId || "");
+      const closestResult = geo ? await fetchRnbClosest(geo) : [];
+      return [key, { addressResult, closestResult }];
+    }, (done,total) => {
+      setProgress(30 + Math.round(16*done/Math.max(1,total)), `Identification RNB des adresses SIAP : ${done} / ${total}`);
+    });
+    const rnbByAddress = new Map(rnbSiapResults.filter(Boolean));
+    const strongRnbIds = new Set();
+    for (const s of siapRows) {
+      const data = rnbByAddress.get(`${s.postal}|${s.addressN}`);
+      if (!data) continue;
+      s.rnbAddressScore = data.addressResult?.geocodeScore ?? null;
+      s.rnbAddressStatus = data.addressResult?.status || "";
+      for (const id of (data.addressResult?.ids || []).slice(0, 8)) { s.rnbAddressIds.add(id); s.rnbIds.add(id); strongRnbIds.add(id); }
+      for (const c of (data.closestResult || []).slice(0, 10)) {
+        const old = s.rnbClosest.get(c.id);
+        if (!Number.isFinite(old) || c.distance < old) s.rnbClosest.set(c.id, c.distance);
+        s.rnbIds.add(c.id);
+      }
+    }
+
+    const detailIds = [...strongRnbIds];
+    await mapConcurrent(detailIds, RNB_CONCURRENCY, async id => [id, await fetchRnbDetail(id)], (done,total) => {
+      setProgress(46 + Math.round(7*done/Math.max(1,total)), `Parcelles liées aux bâtiments RNB SIAP : ${done} / ${total}`);
+    });
+    for (const s of siapRows) {
+      for (const id of s.rnbAddressIds) {
+        const detail = rnbDetailCache.get(id);
+        for (const p of extractPlotsFromRnb(detail)) {
+          s.rnbPlotIds.add(p.id); s.plotIds.add(p.id);
+          const parsed = parseRnbPlotId(p.id);
+          if (parsed) {
+            s.parcelKeys.add(parsed.key);
+            s.parcelKeysExact.add(parsed.key);
+            if (!s.parcelLabels.includes(parsed.label)) s.parcelLabels.push(parsed.label);
+          }
+        }
+      }
+    }
+
+    const uniqueEvalAddresses = new Map();
+    for (const ev of evalRows) if (ev.addressN) {
+      const key = `${ev.postal}|${ev.addressN}`;
+      if (!uniqueEvalAddresses.has(key)) uniqueEvalAddresses.set(key, { address: ev.address, postal: ev.postal });
+    }
+    const evalAddrEntries = [...uniqueEvalAddresses.entries()];
+    if (evalAddrEntries.length) {
+      const evalGeoResults = await mapConcurrent(evalAddrEntries, GEO_CONCURRENCY, async ([key,v]) => [key, await geocodeAddress(v.address, v.postal)], (done,total) => {
+        setProgress(53 + Math.round(4*done/Math.max(1,total)), `Géocodage des adresses ÉVOLUTION disponibles : ${done} / ${total}`);
+      });
+      const evalGeoByAddress = new Map(evalGeoResults.filter(Boolean));
+      for (const ev of evalRows) if (ev.addressN) {
+        ev.geo = evalGeoByAddress.get(`${ev.postal}|${ev.addressN}`) || null;
+        if (!ev.postal && ev.geo?.postcode) ev.postal = normalizePostalCode(ev.geo.postcode);
+      }
+    }
+
+    const postalToSiapCityCodes = new Map();
+    for (const s of siapRows) {
+      if (!s.postal || !s.geo?.citycode) continue;
+      if (!postalToSiapCityCodes.has(s.postal)) postalToSiapCityCodes.set(s.postal, new Set());
+      postalToSiapCityCodes.get(s.postal).add(s.geo.citycode);
+    }
+    const postals = [...new Set(evalRows.map(e => e.postal).filter(Boolean))];
+    await mapConcurrent(postals, GEO_CONCURRENCY, async p => getCityCodesForPostal(p), (done,total) => {
+      setProgress(57 + Math.round(5*done/Math.max(1,total)), `Identification des communes ÉVOLUTION : ${done} / ${total}`);
+    });
+
+    const parcelRequests = new Map();
+    for (const ev of evalRows) {
+      let cityCodes = [];
+      if (ev.geo?.citycode) cityCodes.push(ev.geo.citycode);
+      cityCodes.push(...(postalCache.get(ev.postal) || []));
+      cityCodes.push(...[...(postalToSiapCityCodes.get(ev.postal) || [])]);
+      ev.candidateCityCodes = [...new Set(cityCodes.filter(x => /^\d{5}$/.test(x)))];
+    }
+
+    const uniqueOwners = [...new Map(evalRows.filter(e => e.ownerN && !e.sirenDirect).map(e => [e.ownerN, e.owner])).entries()];
+    const companyResults = await mapConcurrent(uniqueOwners, 3, async ([key, owner]) => [key, await searchCompaniesByOwner(owner)], (done,total) => {
+      setProgress(62 + Math.round(5*done/Math.max(1,total)), `Résolution SIREN des maîtres d'ouvrage : ${done} / ${total}`);
+    });
+    const companiesByOwner = new Map(companyResults.filter(Boolean));
+    for (const ev of evalRows) {
+      if (!ev.sirenDirect) {
+        ev.sirenCandidates = rankCompanyCandidates(ev, companiesByOwner.get(ev.ownerN) || []);
+        ev.sirenBest = ev.sirenCandidates[0] || null;
+      }
+    }
+
+    for (const ev of evalRows) {
+      for (const city of ev.candidateCityCodes) for (const sec of ev.sections) for (const p of ev.parcels) {
+        const key = `${city}|${sec}|${p.number}`;
+        ev.parcelKeys.add(key);
+        const guessedPlotId = buildRnbPlotId(city, sec, p.number); if (guessedPlotId) ev.plotIds.add(guessedPlotId);
+        if (!parcelRequests.has(key)) parcelRequests.set(key, { city, sec, number: p.number });
+      }
+    }
+
+    const requests = [...parcelRequests.entries()];
+    await mapConcurrent(requests, PARCEL_CONCURRENCY, async ([key,q]) => [key, await fetchParcel(q.city, q.sec, q.number)], (done,total) => {
+      setProgress(67 + Math.round(12*done/Math.max(1,total)), `Recherche des parcelles ÉVOLUTION : ${done} / ${total}`);
+    });
+
+    for (const ev of evalRows) {
+      const features = [];
+      for (const city of ev.candidateCityCodes) for (const sec of ev.sections) for (const p of ev.parcels) {
+        const fs = parcelCache.get(`${city}|${sec}|${p.number}`) || [];
+        for (const f of fs) {
+          const clone = { ...f, properties: { ...(f.properties || {}), _matchCityCode: city, _matchSection: sec, _matchParcel: p.number, _partial: p.partial } };
+          features.push(clone);
+          ev.parcelCityCodes.add(city);
+          const ident = parcelIdentityFromFeature(clone, city); if (ident) ev.parcelKeys.add(ident.key);
+          const plotId = plotIdFromFeature(clone, city); if (plotId) ev.plotIds.add(plotId);
+        }
+      }
+      ev.parcelFeatures = features;
+    }
+
+    const uniquePlotIds = [...new Set(evalRows.flatMap(ev => [...ev.plotIds]).filter(Boolean))];
+    await mapConcurrent(uniquePlotIds, RNB_CONCURRENCY, async plotId => [plotId, await fetchRnbByPlot(plotId)], (done,total) => {
+      setProgress(79 + Math.round(8*done/Math.max(1,total)), `Bâtiments RNB présents sur les parcelles : ${done} / ${total}`);
+    });
+    for (const ev of evalRows) {
+      for (const plotId of ev.plotIds) {
+        for (const item of rnbPlotCache.get(plotId) || []) {
+          ev.rnbIds.add(item.id);
+          if (Number.isFinite(item.cover)) {
+            const old = ev.rnbCover.get(item.id);
+            if (!Number.isFinite(old) || item.cover > old) ev.rnbCover.set(item.id, item.cover);
+          }
+        }
+      }
+    }
+  }
+
+  async function runMatching() {
+    if (!rawSiapRows.length || !rawEvalRows.length) return showError("Veuillez charger les deux fichiers.");
+    clearError(); warningMessages = []; els.warningBox.classList.add("hidden"); showColumnWarnings();
+    results = []; els.runButton.disabled = true; els.exportButton.disabled = true; els.statsSection.classList.add("hidden");
+    try {
+      await prepareGeodata();
+      const indexes = buildFuseIndexes();
+      const spatial = buildSpatialIndex();
+      const parcelToSiap = new Map(), rnbStrongToSiap = new Map(), rnbNearToSiap = new Map();
+      for (const s of siapRows) {
+        for (const key of s.parcelKeys) { if (!parcelToSiap.has(key)) parcelToSiap.set(key, []); parcelToSiap.get(key).push(s); }
+        for (const id of s.rnbAddressIds) { if (!rnbStrongToSiap.has(id)) rnbStrongToSiap.set(id, []); rnbStrongToSiap.get(id).push(s); }
+        for (const id of s.rnbClosest.keys()) { if (!rnbNearToSiap.has(id)) rnbNearToSiap.set(id, []); rnbNearToSiap.get(id).push(s); }
+      }
+
+      for (let i=0; i<evalRows.length; i++) {
+        const ev = evalRows[i];
+        const candidateMap = new Map();
+        const add = s => { if (s) candidateMap.set(s.index, s); };
+
+        // 1. SIREN = générateur de candidats prioritaire
+        for (const c of ev.sirenCandidates || []) {
+          if (c.confidence < COMPANY_MIN_CANDIDATE_CONFIDENCE) continue;
+          for (const s of indexes.sirenGroups.get(c.siren) || []) add(s);
+        }
+        // 2. Preuves fortes RNB / parcelle
+        for (const id of ev.rnbIds) {
+          for (const s of rnbStrongToSiap.get(id) || []) add(s);
+          for (const s of rnbNearToSiap.get(id) || []) add(s);
+        }
+        for (const key of ev.parcelKeys) for (const s of parcelToSiap.get(key) || []) add(s);
+        // 3. Commune / code postal
+        for (const city of ev.candidateCityCodes || []) for (const s of indexes.cityGroups.get(city) || []) add(s);
+        for (const s of indexes.postalGroups.get(ev.postal) || []) add(s);
+        // 4. Recherche géographique large dans l'emprise + 500 m
+        for (const s of nearbySiapWithinRadius(ev, spatial, MAX_GEO_CANDIDATE_RADIUS_M)) add(s);
+        // 5. MOA et fuzzy globaux en secours
+        for (const s of indexes.ownerExact.get(ev.ownerN) || []) add(s);
+        const query = ev.combinedN || ev.ownerN || ev.operationN || ev.addressN;
+        if (query) {
+          const localFuse = indexes.postalFuse.get(ev.postal);
+          if (localFuse) for (const x of localFuse.search(query, { limit: 35 })) add(x.item);
+          for (const x of indexes.allFuse.search(query, { limit: 60 })) add(x.item);
+        }
+
+        const candidates = [...candidateMap.values()];
+        let best = null, second = null;
+        for (const s of candidates) {
+          const geo = geoInfoForCandidate(ev, s);
+          const sc = scoreCandidate(ev, s, geo);
+          const candidate = { s, ...sc };
+          if (!best || candidate.score > best.score) { second = best; best = candidate; }
+          else if (!second || candidate.score > second.score) second = candidate;
+        }
+
+        const score = best?.score || 0;
+        const level = score >= AUTO_THRESHOLD ? "auto" : score >= PROBABLE_THRESHOLD ? "probable" : score >= CANDIDATE_THRESHOLD ? "candidate" : "unmatched";
+        const ambiguous = level !== "unmatched" && second && (score - second.score) <= 6 && score < 98;
+        let label = level === "auto" ? "Association automatique" : level === "probable" ? "Probable à vérifier" : level === "candidate" ? "Candidat à contrôler" : "Faible / non associé";
+        if (ambiguous) label += " • concurrent proche";
+        const parcelMatch = best?.parcelMatch || { type:"none", distance:Infinity, keys:[], rank:0, exact:false };
+        results.push({
+          eval: ev, siap: best?.s || null, score, level, statusLabel: label,
+          numeroSiap: (level === "auto" || level === "probable") ? (best?.s?.id || "") : "",
+          method: best?.method || "Aucun candidat", distance: best?.distance ?? Infinity, inside: !!best?.inside,
+          businessScore: best?.businessScore || 0, businessWeight: best?.businessWeight || 0, businessDetails: best?.businessDetails || {}, geoScore: best?.geoScore || 0,
+          parcelMatchType: parcelMatch.type, parcelDistance: parcelMatch.distance, parcelRelationRank: parcelMatch.rank || 0,
+          parcelMatchCount: parcelMatch.keys?.length || 0, parcelMatchKeys: parcelMatch.keys || [], parcelMatchExact: !!parcelMatch.exact,
+          rnbStrongIds: best?.rnbMatch?.strong || [], rnbNearIds: best?.rnbMatch?.near || [], rnbNearDistance: best?.rnbMatch?.minNearDistance ?? Infinity,
+          sirenMatch: !!best?.sirenMatch?.match, sirenConfidence: best?.sirenMatch?.confidence || 0, sirenCandidate: best?.sirenMatch?.candidate || null,
+          secondScore: second?.score || 0, candidateCount: candidates.length, parcelFound: ev.parcelFeatures.length > 0,
+          levelRank: level === "auto" ? 4 : level === "probable" ? 3 : level === "candidate" ? 2 : 1
+        });
+
+        if (i % 10 === 0 || i === evalRows.length-1) {
+          setProgress(87 + Math.round(13*(i+1)/Math.max(1,evalRows.length)), `Scoring multi-critères : ${i+1} / ${evalRows.length}`);
+          await nextFrame();
+        }
+      }
+
+      populateMethodFilter(); renderResults(); updateStats(); els.statsSection.classList.remove("hidden"); els.exportButton.disabled = false;
+      appendWarning(`Diagnostic V4 : SIAP ${siapConsolidationStats.raw} ligne(s) brutes → ${siapConsolidationStats.unique} opération(s) unique(s), soit ${siapConsolidationStats.grouped} ligne(s) regroupée(s). ${siapRows.filter(s=>s.geo).length}/${siapRows.length} opération(s) SIAP géocodée(s) ; ${evalRows.filter(e=>e.sirenBest?.siren).length}/${evalRows.length} MOA ÉVOLUTION avec SIREN résolu ; ${evalRows.filter(e=>e.parcelFeatures.length).length}/${evalRows.length} opération(s) ÉVOLUTION avec géométrie cadastrale.`);
+      if (siapConsolidationStats.missingId) appendWarning(`${siapConsolidationStats.missingId} ligne(s) SIAP sans NUMERO_SIAP n'ont pas pu être regroupées et sont conservées individuellement.`);
+      if (companyErrorCount) appendWarning(`${companyErrorCount} appel(s) Annuaire des Entreprises ont échoué ou expiré ; le moteur a continué avec les autres critères.`);
+      if (rnbErrorCount) appendWarning(`${rnbErrorCount} appel(s) RNB ont échoué ou expiré ; le moteur a continué avec le cadastre, la géographie et les critères métier.`);
+      setProgress(100, "Rapprochement V4 terminé");
+    } catch (err) {
+      console.error(err); showError(`Erreur pendant le rapprochement :
+${err.message || err}`); setProgress(0, "Erreur");
+    } finally { els.runButton.disabled = false; }
+  }
+
+  function levelBadge(r) {
+    if (r.level === "auto") return `<span class="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800">Automatique</span>`;
+    if (r.level === "probable") return `<span class="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">Probable</span>`;
+    if (r.level === "candidate") return `<span class="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-800">Candidat</span>`;
+    return `<span class="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800">Faible</span>`;
+  }
+
+  function scoreBadge(score) {
+    const cls = score >= AUTO_THRESHOLD ? "bg-green-100 text-green-800" : score >= PROBABLE_THRESHOLD ? "bg-amber-100 text-amber-800" : score >= CANDIDATE_THRESHOLD ? "bg-orange-100 text-orange-800" : "bg-red-100 text-red-800";
+    return `<span class="inline-flex px-2.5 py-1 rounded-lg text-xs font-bold ${cls}">${score} %</span>`;
+  }
+
+  function parcelRelationLabel(r) {
+    if (r.parcelMatchType === "identical" || r.parcelMatchType === "same_reference_nearby") return "Identique";
+    if (r.parcelMatchType === "adjacent") return "Adjacente";
+    if (r.parcelMatchType === "near25") return `Proche ~${Math.round(r.parcelDistance)} m`;
+    if (r.parcelMatchType === "near100") return `Proche ~${Math.round(r.parcelDistance)} m`;
+    if (r.parcelMatchType === "near500") return `Proche ~${Math.round(r.parcelDistance)} m`;
+    return "—";
+  }
+
+  function shortIds(ids, max = 2) {
+    const arr = [...new Set(ids || [])];
+    if (!arr.length) return "—";
+    return arr.slice(0,max).join(" ; ") + (arr.length > max ? ` +${arr.length-max}` : "");
+  }
+
+  function populateMethodFilter() {
+    const current = els.methodFilter.value || "all";
+    const methods = [...new Set(results.map(r => r.method).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"fr"));
+    els.methodFilter.innerHTML = `<option value="all">Toutes méthodes</option>` + methods.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+    if (methods.includes(current)) els.methodFilter.value = current;
+  }
+
+  function sortValue(r, key) {
+    const map = {
+      levelRank: r.levelRank, score: r.score, method: r.method, distance: Number.isFinite(r.distance) ? r.distance : 1e12,
+      parcelRelationRank: r.parcelRelationRank, sirenMatch: r.sirenMatch ? 1 : 0, evalId: r.eval?.id || "", evalOwner: r.eval?.owner || "", evalOperation: r.eval?.operation || "",
+      siapId: r.siap?.id || "", siapSourceRows: r.siap?.sourceRowCount || 0, siapOwner: r.siap?.owner || "", siapOperation: r.siap?.operation || "",
+      streetScore: r.businessDetails?.street ?? -1, businessScore: r.businessScore
+    };
+    return map[key];
+  }
+
+  function compareValues(a,b) {
+    if (typeof a === "number" && typeof b === "number") return a-b;
+    return String(a ?? "").localeCompare(String(b ?? ""), "fr", { numeric:true, sensitivity:"base" });
+  }
+
+  function getFilteredResults() {
+    const q = normalizeText(els.searchInput.value), status = els.statusFilter.value, evidence = els.evidenceFilter.value;
+    const dist = els.distanceFilter.value === "all" ? Infinity : Number(els.distanceFilter.value);
+    const siren = els.sirenFilter.value, minScore = Number(els.minScoreFilter.value || 0), method = els.methodFilter.value;
+    const filtered = results.filter(r => {
+      if (status !== "all" && r.level !== status) return false;
+      if (r.score < minScore) return false;
+      if (Number.isFinite(dist) && !(Number.isFinite(r.distance) && r.distance <= dist)) return false;
+      if (siren === "yes" && !r.sirenMatch) return false;
+      if (siren === "no" && r.sirenMatch) return false;
+      if (method !== "all" && r.method !== method) return false;
+      if (evidence === "rnb" && !(r.rnbStrongIds.length || r.rnbNearIds.length)) return false;
+      if (evidence === "parcelExact" && !(r.parcelMatchType === "identical" || r.parcelMatchType === "same_reference_nearby")) return false;
+      if (evidence === "parcelAdjacent" && r.parcelMatchType !== "adjacent") return false;
+      if (evidence === "parcelNear" && !["near25","near100","near500"].includes(r.parcelMatchType)) return false;
+      if (evidence === "siren" && !r.sirenMatch) return false;
+      if (evidence === "geo" && !(Number.isFinite(r.distance) && r.distance <= 500)) return false;
+      if (!q) return true;
+      return normalizeText([r.eval?.id,r.eval?.owner,r.eval?.operation,r.eval?.cadastreLabel,r.eval?.sirenBest?.siren,r.siap?.id,r.siap?.owner,r.siap?.operation,r.siap?.address,r.siap?.siren,r.method,parcelRelationLabel(r)].join(" ")).includes(q);
+    });
+    filtered.sort((a,b) => {
+      const c = compareValues(sortValue(a, sortState.key), sortValue(b, sortState.key));
+      return sortState.dir === "asc" ? c : -c;
+    });
+    return filtered;
+  }
+
+  function renderResults() {
+    const filtered = getFilteredResults();
+    if (!filtered.length) {
+      els.resultsBody.innerHTML = `<tr><td colspan="15" class="px-6 py-16 text-center text-slate-400">Aucun résultat correspondant aux filtres.</td></tr>`;
+    } else {
+      els.resultsBody.innerHTML = filtered.map(r => {
+        const b = r.businessDetails || {};
+        const detail = [
+          `MO ${b.owner ?? "—"}%`, `Nom ${b.operation ?? "—"}%`, `Rue ${b.street ?? "—"}%`,
+          Number.isFinite(b.logements) ? `Log. ${b.logements}%` : "", Number.isFinite(b.batiments) ? `Bât. ${b.batiments}%` : "", Number.isFinite(b.surface) ? `Surf. ${b.surface}%` : ""
+        ].filter(Boolean).join(" • ");
+        return `<tr class="hover:bg-slate-50">
+          <td class="px-4 py-3 whitespace-nowrap">${levelBadge(r)}${r.statusLabel.includes("concurrent") ? `<div class="text-[11px] text-amber-700 mt-1">Concurrent proche : ${r.secondScore}%</div>` : ""}</td>
+          <td class="px-4 py-3 whitespace-nowrap">${scoreBadge(r.score)}<div class="text-[11px] text-slate-400 mt-1">${r.candidateCount} candidat(s)</div></td>
+          <td class="px-4 py-3 min-w-[210px] text-xs">${escapeHtml(r.method)}</td>
+          <td class="px-4 py-3 whitespace-nowrap font-semibold mono">${escapeHtml(formatDistance(r.distance, r.inside))}</td>
+          <td class="px-4 py-3 whitespace-nowrap"><span class="font-semibold ${r.parcelRelationRank >= 3 ? "text-green-700" : r.parcelRelationRank ? "text-amber-700" : "text-slate-400"}">${escapeHtml(parcelRelationLabel(r))}</span>${Number.isFinite(r.parcelDistance) && r.parcelDistance>0 ? `<div class="text-[11px] text-slate-400">écart parcelles ~${Math.round(r.parcelDistance)} m</div>` : ""}</td>
+          <td class="px-4 py-3 whitespace-nowrap"><div class="font-mono ${r.sirenMatch ? "text-indigo-800 font-bold" : "text-slate-400"}">${escapeHtml(r.eval?.sirenBest?.siren || "—")}</div><div class="text-[11px] ${r.sirenMatch ? "text-green-700 font-semibold" : "text-slate-400"}">${r.sirenMatch ? `= ${escapeHtml(r.siap?.siren || "")}` : "pas de SIREN commun"}</div></td>
+          <td class="px-4 py-3 whitespace-nowrap font-medium">${escapeHtml(r.eval?.id || "")}</td>
+          <td class="px-4 py-3">${escapeHtml(r.eval?.owner || "")}</td>
+          <td class="px-4 py-3">${escapeHtml(r.eval?.operation || "")}<div class="text-[11px] text-slate-400 mt-1">${escapeHtml(r.eval?.cadastreLabel || "")}</div></td>
+          <td class="px-4 py-3 whitespace-nowrap font-bold ${r.level !== "unmatched" ? "text-green-800" : "text-slate-500"}">${escapeHtml(r.siap?.id || "")}</td>
+          <td class="px-4 py-3 whitespace-nowrap text-center"><span class="inline-flex min-w-8 justify-center px-2 py-1 rounded-lg bg-slate-100 font-semibold">${r.siap?.sourceRowCount || 0}</span></td>
+          <td class="px-4 py-3">${escapeHtml(r.siap?.owner || "")}</td>
+          <td class="px-4 py-3">${escapeHtml(r.siap?.operation || "")}</td>
+          <td class="px-4 py-3">${escapeHtml(r.siap?.address || "")}${r.siap?.geo?.label ? `<div class="text-[11px] text-slate-400 mt-1">${escapeHtml(r.siap.geo.label)}</div>` : ""}<div class="text-[11px] mt-1">Rue : <b>${b.street ?? "—"}%</b>${b.houseNumber !== undefined ? ` • N° : <b>${b.houseNumber}%</b>` : ""}</div></td>
+          <td class="px-4 py-3 text-xs"><div class="font-semibold">Métier ${r.businessScore}% • Géo ${r.geoScore}%</div><div class="text-slate-500 mt-1 leading-5">${escapeHtml(detail)}</div><div class="text-slate-400 mt-1">RNB : ${escapeHtml(shortIds([...r.rnbStrongIds,...r.rnbNearIds]))}</div></td>
+        </tr>`;
+      }).join("");
+    }
+    els.tableFooter.classList.remove("hidden");
+    els.tableFooter.textContent = `${formatNumber(filtered.length)} résultat(s) affiché(s) sur ${formatNumber(results.length)} • tri ${sortState.key} ${sortState.dir === "asc" ? "croissant" : "décroissant"}`;
+  }
+
+  function updateStats() {
+    const total = results.length;
+    els.statSiapRaw.textContent = formatNumber(siapConsolidationStats.raw);
+    els.statSiapUnique.textContent = formatNumber(siapConsolidationStats.unique);
+    els.statSiapGrouped.textContent = formatNumber(siapConsolidationStats.grouped);
+    els.statTotal.textContent = formatNumber(total);
+    els.statAuto.textContent = formatNumber(results.filter(r => r.level === "auto").length);
+    els.statProbable.textContent = formatNumber(results.filter(r => r.level === "probable").length);
+    els.statCandidate.textContent = formatNumber(results.filter(r => r.level === "candidate").length);
+    els.statRnb.textContent = formatNumber(results.filter(r => r.rnbStrongIds.length || r.rnbNearIds.length).length);
+    els.statParcel.textContent = formatNumber(results.filter(r => r.parcelRelationRank > 0).length);
+    els.statSirenMatch.textContent = formatNumber(results.filter(r => r.sirenMatch).length);
+    const avg = total ? Math.round(results.reduce((sum,r)=>sum+r.score,0)/total) : 0;
+    els.statAverage.textContent = `${avg} %`;
+  }
+
+  function exportResults() {
+    if (!results.length) return;
+    const rows = results.map(r => ({
+      ...r.eval.original,
+      "NUMERO_SIAP": (r.level === "auto" || r.level === "probable") ? (r.siap?.id || "") : "",
+      "RAPPROCHEMENT_NUMERO_SIAP_CANDIDAT": r.siap?.id || "",
+      "RAPPROCHEMENT_NIVEAU": r.level === "auto" ? "AUTOMATIQUE" : r.level === "probable" ? "PROBABLE A VERIFIER" : r.level === "candidate" ? "CANDIDAT A CONTROLER" : "FAIBLE / NON ASSOCIE",
+      "RAPPROCHEMENT_SCORE_GLOBAL": r.score,
+      "RAPPROCHEMENT_METHODE": r.method,
+      "RAPPROCHEMENT_NB_CANDIDATS_TESTES": r.candidateCount,
+      "RAPPROCHEMENT_SCORE_CONCURRENT_2": r.secondScore,
+      "RAPPROCHEMENT_DISTANCE_M": Number.isFinite(r.distance) ? Math.round(r.distance) : "",
+      "RAPPROCHEMENT_PARCELLE_RELATION": parcelRelationLabel(r),
+      "RAPPROCHEMENT_DISTANCE_ENTRE_PARCELLES_M": Number.isFinite(r.parcelDistance) ? Math.round(r.parcelDistance) : "",
+      "RAPPROCHEMENT_PARCELLES_COMMUNES": r.parcelMatchKeys.map(formatParcelKey).join(" ; "),
+      "RAPPROCHEMENT_RNB_COMMUN": (r.rnbStrongIds.length || r.rnbNearIds.length) ? "OUI" : "NON",
+      "RAPPROCHEMENT_RNB_IDS": [...r.rnbStrongIds,...r.rnbNearIds].join(" ; "),
+      "RAPPROCHEMENT_SIREN_EVOLUTION": r.eval.sirenBest?.siren || "",
+      "RAPPROCHEMENT_SIREN_EVOLUTION_CONFIANCE": r.eval.sirenBest?.confidence ?? "",
+      "RAPPROCHEMENT_SIREN_SIAP": r.siap?.siren || "",
+      "RAPPROCHEMENT_SIREN_COMMUN": r.sirenMatch ? "OUI" : "NON",
+      "RAPPROCHEMENT_SIAP_NB_LIGNES_SOURCE": r.siap?.sourceRowCount || "",
+      "RAPPROCHEMENT_SIAP_MAITRISE_OUVRAGE": r.siap?.owner || "",
+      "RAPPROCHEMENT_SIAP_NOM_OPERATION": r.siap?.operation || "",
+      "RAPPROCHEMENT_SIAP_ADRESSE": r.siap?.address || "",
+      "RAPPROCHEMENT_SIAP_CADASTRE_EXTRAIT": (r.siap?.parcelLabels || []).join(" ; "),
+      "RAPPROCHEMENT_SCORE_METIER": r.businessScore,
+      "RAPPROCHEMENT_SCORE_GEO": r.geoScore,
+      "RAPPROCHEMENT_SCORE_SIREN": r.businessDetails.siren ?? "",
+      "RAPPROCHEMENT_SCORE_MOA": r.businessDetails.owner ?? "",
+      "RAPPROCHEMENT_SCORE_OPERATION": r.businessDetails.operation ?? "",
+      "RAPPROCHEMENT_SCORE_ADRESSE": r.businessDetails.address ?? "",
+      "RAPPROCHEMENT_SCORE_RUE": r.businessDetails.street ?? "",
+      "RAPPROCHEMENT_SCORE_NUMERO_RUE": r.businessDetails.houseNumber ?? "",
+      "RAPPROCHEMENT_SCORE_LOGEMENTS": r.businessDetails.logements ?? "",
+      "RAPPROCHEMENT_SCORE_BATIMENTS": r.businessDetails.batiments ?? "",
+      "RAPPROCHEMENT_SCORE_SURFACE": r.businessDetails.surface ?? "",
+      "RAPPROCHEMENT_SCORE_REFERENTIEL": r.businessDetails.referential ?? "",
+      "RAPPROCHEMENT_SCORE_REGLEMENTATION": r.businessDetails.regulation ?? "",
+      "RAPPROCHEMENT_SCORE_TYPE": r.businessDetails.type ?? "",
+      "RAPPROCHEMENT_SCORE_DATE": r.businessDetails.date ?? ""
+    }));
+
+    const consolidated = siapRows.map(s => ({
+      "NUMERO_SIAP": s.id,
+      "NB_LIGNES_SIAP_SOURCE": s.sourceRowCount,
+      "CODE_POSTAL": s.postal,
+      "SIREN": s.siren,
+      "MAITRISE_OUVRAGE": s.owner,
+      "NOM_OPERATION": s.operation,
+      "ADRESSE_OPERATION": s.address,
+      "TOTAL_LOGEMENTS_CONSOLIDE": s.totalLogements ?? "",
+      "TOTAL_BATIMENTS_CONSOLIDE": s.totalBatiments ?? "",
+      "SURFACE_CONSOLIDEE": s.surface ?? "",
+      "REFERENTIELS": s.referential,
+      "REGLEMENTATIONS": s.regulation,
+      "TYPES": s.type,
+      "ADRESSE_GEOCODEE": s.geo?.label || "",
+      "PARCELLES_EXTRAITES": (s.parcelLabels || []).join(" ; "),
+      "RNB_ADRESSE": [...s.rnbAddressIds].join(" ; ")
+    }));
+
+    const wb = XLSX.utils.book_new();
+    const append = (name, data) => {
+      const ws = XLSX.utils.json_to_sheet(data.length ? data : [{ "Information": "Aucune ligne" }]);
+      ws["!cols"] = Object.keys(data[0] || { Information: "" }).map(k => ({ wch: Math.min(45, Math.max(14, k.length + 2)) }));
+      XLSX.utils.book_append_sheet(wb, ws, name.slice(0,31));
+    };
+    append("Rapprochement V4", rows);
+    append("Associations auto", rows.filter(x => x.RAPPROCHEMENT_NIVEAU === "AUTOMATIQUE"));
+    append("Probables", rows.filter(x => x.RAPPROCHEMENT_NIVEAU === "PROBABLE A VERIFIER"));
+    append("Candidats", rows.filter(x => x.RAPPROCHEMENT_NIVEAU === "CANDIDAT A CONTROLER"));
+    append("SIAP consolide", consolidated);
+    append("Synthese", [{
+      "Version": "V4 Consolidation + géographie 500 m",
+      "Lignes SIAP brutes": siapConsolidationStats.raw,
+      "Operations SIAP uniques": siapConsolidationStats.unique,
+      "Lignes SIAP regroupees": siapConsolidationStats.grouped,
+      "Lignes EVOLUTION": results.length,
+      "Associations automatiques": results.filter(r=>r.level==="auto").length,
+      "Probables": results.filter(r=>r.level==="probable").length,
+      "Candidats 50-69": results.filter(r=>r.level==="candidate").length,
+      "Liens RNB": results.filter(r=>r.rnbStrongIds.length || r.rnbNearIds.length).length,
+      "Liens parcellaires": results.filter(r=>r.parcelRelationRank>0).length,
+      "SIREN communs": results.filter(r=>r.sirenMatch).length
+    }]);
+    const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,"-");
+    XLSX.writeFile(wb, `Rapprochement_SIAP_EVOLUTION_V4_${stamp}.xlsx`);
+  }
+
+  function updateRunButton() { els.runButton.disabled = !(rawSiapRows.length && rawEvalRows.length); }
+  function setProgress(percent, text) { const p=Math.max(0,Math.min(100,percent)); els.progressBar.style.width=`${p}%`; els.progressPercent.textContent=`${Math.round(p)} %`; if(text) els.progressText.textContent=text; }
+  function showError(msg) { els.errorBox.textContent=msg; els.errorBox.classList.remove("hidden"); }
+  function clearError() { els.errorBox.classList.add("hidden"); els.errorBox.textContent=""; }
+  function formatNumber(v) { return new Intl.NumberFormat("fr-FR").format(v); }
+  function escapeHtml(v) { return String(v ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\"/g,"&quot;").replace(/'/g,"&#039;"); }
+  function nextFrame() { return new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve,0))); }
+
+  configureDropZone(els.dropSiap, els.fileSiap, "SIAP");
+  configureDropZone(els.dropEval, els.fileEval, "EVAL");
+  els.runButton.addEventListener("click", runMatching);
+  els.exportButton.addEventListener("click", exportResults);
+  [els.searchInput, els.minScoreFilter].forEach(el => el.addEventListener("input", renderResults));
+  [els.statusFilter, els.evidenceFilter, els.distanceFilter, els.sirenFilter, els.methodFilter].forEach(el => el.addEventListener("change", renderResults));
+  document.querySelectorAll("th.sortable").forEach(th => th.addEventListener("click", () => {
+    const key = th.dataset.sort;
+    if (sortState.key === key) sortState.dir = sortState.dir === "asc" ? "desc" : "asc";
+    else { sortState.key = key; sortState.dir = ["score","levelRank","parcelRelationRank","sirenMatch","siapSourceRows","businessScore"].includes(key) ? "desc" : "asc"; }
+    renderResults();
+  }));
+  els.resetFilters.addEventListener("click", () => {
+    els.searchInput.value = ""; els.statusFilter.value = "all"; els.evidenceFilter.value = "all"; els.distanceFilter.value = "all";
+    els.sirenFilter.value = "all"; els.minScoreFilter.value = ""; els.methodFilter.value = "all"; sortState = { key:"score", dir:"desc" }; renderResults();
+  });
+})();
+</script>
+</body>
+</html>

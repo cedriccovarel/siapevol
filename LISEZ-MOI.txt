@@ -1,0 +1,22 @@
+RAPPROCHEMENT SIAP / EVOLUTION - V4
+
+UTILISATION
+1. Décompresser le ZIP.
+2. Double-cliquer sur index.html.
+3. Charger le fichier SIAP et le fichier EVOLUTION.
+4. Cliquer sur Lancer le rapprochement V4.
+5. Filtrer et trier directement dans le tableau.
+6. Exporter en Excel si nécessaire.
+
+NOUVEAUTES V4
+- Consolidation automatique du SIAP : 1 NUMERO_SIAP = 1 opération de travail.
+- Conservation du nombre de lignes SIAP sources pour audit.
+- Recherche géographique élargie jusqu'à 500 m.
+- Parcelles identiques, adjacentes et proches.
+- SIREN utilisé comme générateur prioritaire de candidats.
+- Scoring séparé : MOA, opération, adresse, rue, numéro de rue, logements, bâtiments, surface, RNB, cadastre.
+- Filtres instantanés et tri croissant/décroissant sur les en-têtes.
+- Une feuille Excel SIAP consolide est incluse dans l'export.
+
+IMPORTANT
+Le traitement Excel reste dans le navigateur. Une connexion Internet est nécessaire pour charger les bibliothèques CDN et interroger les API publiques IGN/Géoplateforme, RNB et Annuaire des Entreprises.
