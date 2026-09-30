@@ -1,0 +1,23 @@
+PASS Equal retained RNB sets
+PASS Base building is included in a larger SIAP operation
+PASS Partial base coverage never automatic
+PASS Distinct SIAP on same RNB blocks automatic despite score gap
+PASS Same SIAP number is counted once
+PASS All ambiguous candidate RNBs are indexed
+PASS Candidates on both sides are not retained matches
+PASS Different retained IDs conflict
+PASS Inactive IDs are not indexed
+PASS All matching source addresses retained, duplicates removed
+PASS Address alone gives unique precise RNB
+PASS Address with multiple buildings remains ambiguous
+PASS Address result pagination retains all candidates
+PASS Nearby building cannot replace a missing address match
+PASS Different house number is never precise
+PASS Two equally plausible geocoded addresses are flagged
+PASS Street-only geocode is not a building proof
+PASS Geocoding failure still runs candidate-only textual RNB search
+PASS API address status is exported as warning, not accepted as evidence
+PASS Conflicting plot and precise address prevent automatic selection
+PASS Foreign pagination URL never fetched
+PASS Address API failure distinct from empty results
+22/22 bilateral RNB tests passed

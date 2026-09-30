@@ -1,0 +1,74 @@
+'use strict';
+const assert=require('node:assert/strict');
+const C=require('../cadastre-rnb.js');
+const tests=[];
+function test(name,fn){tests.push([name,fn]);}
+const feature=(id)=>({type:'Feature',properties:{id},geometry:{type:'Polygon',coordinates:[[[2,48],[2.001,48],[2.001,48.001],[2,48.001],[2,48]]]}});
+const A='AAAAAAAAAAAA', B='BBBBBBBBBBBB', plot='45234000AB0012';
+const bdg=(id=A,cover=1,extra={})=>({rnb_id:id,bdg_cover_ratio:cover,is_active:true,status:'constructed',...extra});
+const response=(value,status=200)=>({ok:status>=200&&status<300,status,headers:{get:()=>null},json:async()=>value});
+function fixture(options={}) {
+  const calls=[];
+  const fetch=async url=>{
+    calls.push(url);const u=new URL(url);
+    if(u.host==='geo.api.gouv.fr')return response(u.pathname==='/communes'?[{code:'45234',nom:'Olivet',codesPostaux:['45160']}]:{code:'45234',nom:'Olivet',codesPostaux:['45160']});
+    if(u.host==='apicarto.ign.fr')return response({features:options.features??[feature(plot)]});
+    if(u.pathname.includes('/plot/')) {
+      if(options.failPlot)return response({},503);
+      if(u.searchParams.has('page'))return response({results:[bdg(B)],next:null});
+      return response({results:options.buildings??[bdg()],next:options.paged?'?page=2':null});
+    }
+    if(u.pathname.endsWith('/address/'))return response({results:options.addressBuildings??[],score_ban:.95,status:'ok'});
+    if(u.pathname.endsWith('/closest/'))return response({results:options.nearBuildings??[],next:null});
+    if(u.host==='data.geopf.fr')return response({features:[{geometry:{type:'Point',coordinates:[2,48]},properties:{citycode:'45234',postcode:'45160',city:'Olivet',score:.95,type:'housenumber',housenumber:'1',id:'45234_1234_00001',label:'1 rue du Test'}}]});
+    if(u.pathname.includes('/buildings/'))return response(bdg(u.pathname.split('/').filter(Boolean).at(-1)));
+    throw Error('Unexpected URL '+url);
+  };
+  return {engine:new C.Engine({fetch,rate:0,sleep:async()=>{},retries:0}),calls};
+}
+const input={city:'Olivet',postal:'45160',section:'AB',parcels:'12'};
+test('Postal leading zero',()=>assert.equal(C.postal(750),'') );
+test('Postal and INSEE numeric padding',()=>{assert.equal(C.postal(1000),'01000');assert.equal(C.code(1001),'01001');});
+test('Corsica INSEE',()=>assert.equal(C.code('2a004'),'2A004'));
+test('Full ID retains absorbed prefix',()=>assert.equal(C.fullId('45234 123 AB 0012').prefix,'123'));
+test('Corsica full ID',()=>assert.equal(C.fullId('2A004000AB0012').city,'2A004'));
+test('No truncated invalid parcel number',()=>assert.equal(C.number('12345'),''));
+test('No invented prefix',()=>assert.equal(C.makeId('45234',null,'AB',12),''));
+test('Single-letter section normalized',()=>assert.equal(C.section('A'),'0A'));
+test('Excel 4-field layout Code cadastral = section',()=>{const r=C.parseInput({...input,section:'',cadastral:'AB'});assert.equal(r.refs[0].section,'AB');assert.equal(r.issues.length,0);});
+test('Code cadastral = INSEE',()=>{const r=C.parseInput({...input,cadastral:'45234'});assert.equal(r.insee,'45234');assert.equal(r.refs[0].city,'45234');});
+test('Code cadastral = full ID',()=>{const r=C.parseInput({cadastral:plot});assert.equal(r.refs[0].id,plot);assert.equal(r.issues.length,0);});
+test('Conflicting INSEE inputs flagged',()=>assert.ok(C.parseInput({insee:'45234',cadastral:'75101'}).issues.length));
+test('Full identifier never split into short numbers',()=>{const r=C.parseInput({parcels:plot});assert.equal(r.refs.length,1);assert.equal(r.refs[0].id,plot);});
+test('List and partial parcels',()=>{const r=C.parseInput({...input,parcels:'324,325;88p'});assert.deepEqual(r.refs.map(x=>x.number),['0324','0325','0088']);assert.equal(r.refs[2].partial,true);});
+test('French ranges',()=>assert.equal(C.parseInput({...input,parcels:'17 \u00e0 21'}).refs.length,5));
+test('Explicit section-number pairing',()=>{const r=C.parseInput({parcels:'AB 12,13 ; AC 7'});assert.deepEqual(r.refs.map(x=>x.section+x.number),['AB0012','AB0013','AC0007']);});
+test('Single-letter explicit section is not range delimiter',()=>{const r=C.parseInput({parcels:'A 12'});assert.equal(r.refs[0].section,'0A');});
+test('Ambiguous multiple sections rejected (no Cartesian product)',()=>{const r=C.parseInput({...input,section:'AB/AC',parcels:'12;13'});assert.equal(r.refs.length,0);assert.ok(r.issues.length);});
+test('Oversized range rejected',()=>{const r=C.parseInput({...input,parcels:'1-9999'});assert.equal(r.refs.length,0);assert.ok(r.issues.length);});
+test('Missing section flagged',()=>assert.ok(C.parseInput({parcels:'12'}).issues.length));
+test('Missing number flagged',()=>assert.ok(C.parseInput({section:'AB'}).issues.length));
+test('Feature identity with Corsica properties',()=>assert.equal(C.featureId({properties:{code_dep:'2A',code_com:'004',com_abs:'123',section:'AB',numero:'12'}}),'2A004123AB0012'));
+test('Two different absorbed prefixes are distinct',()=>assert.notEqual(C.fullId('45234000AB0012').key,C.fullId('45234123AB0012').key));
+test('RNB IDs formatting',()=>assert.deepEqual(C.rnbIds('ABCD-EFGH-IJKL ; MNOPQRSTUVWX'),['ABCDEFGHIJKL','MNOPQRSTUVWX']));
+test('100/100 ties remain ambiguous',()=>{const d=C.classify({score:100,automaticEligible:true,s:{id:'S1'}},{score:100,s:{id:'S2'}});assert.equal(d.numeroSiap,'');assert.equal(d.ambiguous,true);});
+test('Unique eligible candidate can be automatic',()=>assert.equal(C.classify({score:95,automaticEligible:true,s:{id:'S1'}},{score:80,s:{id:'S2'}}).numeroSiap,'S1'));
+test('Probable never writes NUMERO_SIAP',()=>assert.equal(C.classify({score:84,s:{id:'S1'}},null).numeroSiap,''));
+test('One plot one building, precise source',async()=>{const {engine}=fixture();const r=await engine.enrich(input);assert.deepEqual([...r.primaryRnbIds],[A]);assert.equal(r.eligibleAutomatic,true);assert.equal(r.refPlotIds.size,1);});
+test('RNB multi-page fully retained, no arbitrary first building',async()=>{const {engine,calls}=fixture({paged:true});const r=await engine.enrich(input);assert.equal(r.rnbIds.size,2);assert.equal(r.primaryRnbIds.size,0);assert.ok(calls.some(x=>x.endsWith('?page=2')));});
+test('Small geometric overlap is not a retained RNB',async()=>{const {engine}=fixture({buildings:[bdg(A,.01)]});const r=await engine.enrich(input);assert.equal(r.rnbIds.size,1);assert.equal(r.primaryRnbIds.size,0);});
+test('Partial parcel never auto-selects unique building',async()=>{const {engine}=fixture();const r=await engine.enrich({...input,parcels:'12p'});assert.equal(r.primaryRnbIds.size,0);assert.ok(r.issues.length);});
+test('Two prefixes found: flagged, no auto-financial association',async()=>{const {engine}=fixture({features:[feature(plot),feature('45234123AB0012')]});const r=await engine.enrich(input);assert.equal(r.refPlotIds.size,2);assert.equal(r.eligibleAutomatic,false);});
+test('Explicit prefix filters returned parcels',async()=>{const {engine}=fixture({features:[feature(plot),feature('45234123AB0012')]});const r=await engine.enrich({...input,prefix:'123'});assert.deepEqual([...r.refPlotIds],['45234123AB0012']);});
+test('No fabricated reference after empty cadastre',async()=>{const {engine,calls}=fixture({features:[]});const r=await engine.enrich(input);assert.equal(r.plotIds.size,0);assert.equal(r.parcelKeys.size,0);assert.ok(!calls.some(x=>x.includes('/plot/')));});
+test('API failure is distinct from no result, not cached',async()=>{const {engine,calls}=fixture({failPlot:true});const a=await engine.enrich(input);const b=await engine.enrich(input);assert.ok(a.errors.length);assert.equal(a.eligibleAutomatic,false);assert.equal(calls.filter(x=>x.includes('/plot/')).length,2);assert.ok(b.errors.length);});
+test('Successful request cache and deduplication',async()=>{const {engine,calls}=fixture();await Promise.all([engine.json(C.BASE.communes),engine.json(C.BASE.communes)]);assert.equal(calls.length,1);assert.ok(engine.log.some(x=>x.cache));});
+test('Inactive RNB is visible but never selected',async()=>{const {engine}=fixture({buildings:[bdg(A,1,{is_active:false})]});const r=await engine.enrich(input);assert.equal(r.rnbIds.size,1);assert.equal(r.primaryRnbIds.size,0);});
+test('Demolished building excluded',async()=>{const {engine}=fixture({buildings:[bdg(A,1,{status:'demolished'})]});const r=await engine.enrich(input);assert.equal(r.primaryRnbIds.size,0);});
+test('Plot+exact address disambiguates two buildings',async()=>{const {engine}=fixture({buildings:[bdg(A),bdg(B)],addressBuildings:[bdg(B)]});const r=await engine.enrich({...input,address:'1 rue du Test'});assert.deepEqual([...r.primaryRnbIds],[B]);});
+test('Postal-only multiple communes never scanned indiscriminately',async()=>{const {engine,calls}=fixture();const original=engine.fetch;engine.fetch=async u=>u.includes('geo.api.gouv.fr')?response([{code:'45234',nom:'Olivet'},{code:'45235',nom:'Autre'}]):original(u);const r=await engine.enrich({...input,city:''});assert.equal(r.candidateCityCodes.length,0);assert.equal(r.plotIds.size,0);});
+test('Direct RNB conflicts detected',async()=>{const {engine}=fixture();const a=await engine.enrich({rnb:A}),b=await engine.enrich({rnb:B});assert.equal(C.compareRnb(a,b).conflict,true);});
+test('Cancelled engine stops requests',async()=>{const {engine,calls}=fixture();engine.cancel();await assert.rejects(engine.json(C.BASE.communes));assert.equal(calls.length,0);});
+test('Cross-origin pagination rejected',async()=>{const engine=new C.Engine({fetch:async()=>response({results:[],next:'https://evil.test/x'}),rate:0,retries:0});await assert.rejects(engine.paged(C.BASE.rnb+'/plot/'+plot+'/'),/hors service/);});
+test('Cyclic pagination rejected',async()=>{const url=C.BASE.rnb+'/plot/'+plot+'/';const engine=new C.Engine({fetch:async()=>response({results:[],next:url}),rate:0,retries:0});await assert.rejects(engine.paged(url),/cyclique/);});
+(async()=>{let failed=0;for(const [name,fn]of tests){try{await fn();console.log('PASS '+name);}catch(e){failed++;console.error('FAIL '+name+'\n'+e.stack);}}console.log(`\n${tests.length-failed}/${tests.length} tests passed`);process.exitCode=failed?1:0;})();

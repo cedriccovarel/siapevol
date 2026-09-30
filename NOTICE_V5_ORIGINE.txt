@@ -1,0 +1,54 @@
+RAPPROCHEMENT SIAP / EVOLUTION - V5
+Livraison du 30 septembre 2026
+
+1. OUVRIR
+Décompressez le ZIP dans un dossier distinct de la V4. Conservez ensemble index.html, app.css, app.js et cadastre-rnb.js. Ouvrez index.html dans un navigateur récent, ou publiez l’ensemble du dossier sur votre hébergement existant. Une connexion Internet est nécessaire (bibliothèques XLSX, Fuse et Turf + services publics). La V4 n’est pas modifiée.
+
+2. IMPORTER
+Dans ÉVOLUTION, chargez votre propre Excel ou le modèle joint, après l’avoir complété. Les colonnes supplémentaires sont autorisées et conservées comme valeurs. Ce n’est pas une conservation de la mise en forme ni des formules du classeur original.
+Le système détecte la feuille et la ligne d’en-têtes parmi les 25 premières lignes. Contrôlez toujours ces choix et la correspondance des colonnes. Une ligne par bâtiment ou analyse ; les codes internes identiques ne fusionnent pas les lignes ÉVOLUTION.
+
+Colonnes de base : Ville | Code postal | Code cadastral | Numéro de parcelle.
+- Dans le cas courant, Code cadastral contient la section (AB, ZD, A...).
+- Un code INSEE ou une référence complète dans cette colonne est reconnu par son format.
+- Préférez les colonnes explicites Code INSEE, Section cadastrale, Préfixe cadastral et Numéro de parcelle quand ces informations sont disponibles.
+- Autre possibilité : Référence cadastrale complète, sur 14 caractères (5 INSEE + 3 préfixe + 2 section + 4 numéro).
+- Le code postal n’est pas le code INSEE. Gardez les zéros initiaux, de préférence au format texte dans Excel.
+- Préfixe inconnu : laissez vide. L’application vérifie auprès du cadastre, sans inventer 000.
+- Parcelles acceptées : 12 ; 12,13 ; 17 à 21 ; 12p. Plusieurs sections : AB 12,13 ; AC 7. Les couples doivent être explicites ; AB/AC avec 12/13 n’est pas interprété arbitrairement.
+- L’adresse du bâtiment, un ID-RNB connu, le SIREN, le maître d’ouvrage, l’intitulé et les nombres de logements/bâtiments confortent le rapprochement.
+
+Le fichier SIAP doit fournir le numéro SIAP. Les autres colonnes sont à mapper selon ce que votre export contient. L’application n’interroge pas directement le SIAP : elle rapproche uniquement cet export. Sans fichier SIAP, le bouton permet d’identifier les RNB de votre Excel.
+
+3. LANCER ET VERIFIER
+Le moteur suit : commune -> parcelle complète -> tous les bâtiments RNB renvoyés -> candidats SIAP. Il conserve le préfixe cadastral et parcourt les pages de résultats RNB.
+Le diagnostic affiche les identifiants, les candidats, les alertes, l’absence de résultat et les erreurs d’API séparément. Les erreurs ne sont pas transformées en « aucun bâtiment ». Une relance refait les appels, sauf cache de succès pendant le même traitement. Les requêtes sont espacées et les interruptions temporaires peuvent être réessayées.
+
+Un recouvrement géométrique ne constitue pas une preuve fiscale. Le seuil interne de 80 % aide à retenir un RNB unique, mais ne garantit pas à lui seul une opération SIAP. Les petits recouvrements, les bâtiments inactifs/démolis, les parcelles partielles et les incohérences restent visibles.
+Une adresse précise peut aider à distinguer les bâtiments d’une même parcelle. La proximité seule et une parcelle commune ne produisent pas une association automatique. Les candidats géographiques jusqu’à 500 m et les critères métier de la V4 sont conservés comme indices.
+
+4. VALIDER
+Voir / choisir ou Preuves / choisir ouvre le détail. Vous pouvez retenir un ou plusieurs RNB, recalculer les candidats SIAP, puis confirmer un SIAP ou rejeter les propositions. Une sélection manuelle RNB ne valide pas automatiquement le SIAP.
+Le score /100 est heuristique, pas une probabilité. L’association automatique exige des preuves fortes, des vérifications sans alerte, des critères concordants et un écart d’au moins 7 points avec le second candidat. Un score ex aequo reste ambigu.
+Les lignes SIAP portant un même NUMERO_SIAP restent consolidées ; toutes les lignes source sont conservées. La règle numérique héritée de V4 retient une valeur répétée ou le maximum plutôt qu’une somme aveugle. Ce choix reste à contrôler pour vos exports typologiques.
+
+5. EXPORTER
+Le classeur de sortie contient les colonnes originales, les candidats et validations, le diagnostic cadastral/RNB, les preuves RNB, les candidats SIAP, les lignes SIAP consolidées et source, le journal API et les correspondances de colonnes.
+NUMERO_SIAP est rempli uniquement pour les associations automatiques ou validées manuellement. RAPPROCHEMENT_NUMERO_SIAP_CANDIDAT reste distinct. Si NUMERO_SIAP existe déjà dans votre fichier, il n’est pas écrasé : la nouvelle colonne reçoit le suffixe _V5 (puis un suffixe supplémentaire si nécessaire).
+Exportez avant de fermer ou de recharger la page. Pas de sauvegarde serveur ni de reprise automatique de session. Changer un fichier ou les correspondances de colonnes efface les résultats courants et les validations manuelles.
+
+6. CONFIDENTIALITE ET RESEAU
+Les classeurs sont lus dans le navigateur ; l’application ne les téléverse pas en entier sur un serveur. Les requêtes transmettent cependant aux API les champs nécessaires (adresses, communes, références cadastrales, RNB ; noms d’entreprises si l’option est cochée). La recherche entreprises peut être désactivée. Les bibliothèques tierces sont chargées depuis jsDelivr ; ce paquet n’est pas entièrement hors ligne.
+Le journal API exporté peut contenir des adresses et des identifiants. Traitez-le comme vos autres données métier. Les requêtes propres à la recherche entreprises, héritée de V4, ne sont pas toutes incluses dans le journal du nouveau moteur cadastral/RNB.
+Une API en panne, un refus CORS, un blocage réseau ou une bibliothèque non chargée nécessite un nouveau test depuis votre poste. Le rapprochement ne peut pas créer un RNB absent du référentiel ni trouver un SIAP absent du fichier importé.
+
+7. TESTS ET LIMITES DE LIVRAISON
+44 tests automatisés du moteur et 19 contrôles navigateur ont réussi avec services et bibliothèques tierces simulés. Les tests du moteur utilisent les formes de réponses documentées. Voir tests/RESULTATS_TESTS.md.
+Les appels réels aux API et le cycle complet d’import/export de classeurs binaires via SheetJS n’ont pas pu être validés dans cet environnement. Le modèle Excel joint a, lui, été créé et relu comme vrai classeur XLSX.
+Seule la V4 de l’application a été fournie, pas un jeu de données SIAP/ÉVOLUTION de production. Aucun taux réel de réussite ne peut donc être annoncé. Commencez par un échantillon dont vous connaissez déjà les parcelles, bâtiments et numéros SIAP.
+
+SOURCES OFFICIELLES
+RNB : https://rnb-api.beta.gouv.fr/api/alpha/schema/
+Cadastre : https://apicarto.ign.fr/api/doc/cadastre
+Communes : https://geo.api.gouv.fr/decoupage-administratif/communes
+Recherche entreprises : https://recherche-entreprises.api.gouv.fr/docs/

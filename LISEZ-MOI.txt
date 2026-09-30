@@ -1,22 +1,84 @@
-RAPPROCHEMENT SIAP / EVOLUTION - V4
+RAPPROCHEMENT SIAP / EVOLUTION - V5.1
+30 septembre 2026
 
-UTILISATION
-1. Décompresser le ZIP.
-2. Double-cliquer sur index.html.
-3. Charger le fichier SIAP et le fichier EVOLUTION.
-4. Cliquer sur Lancer le rapprochement V4.
-5. Filtrer et trier directement dans le tableau.
-6. Exporter en Excel si nécessaire.
+RNB de votre base <-> RNB des adresses SIAP
 
-NOUVEAUTES V4
-- Consolidation automatique du SIAP : 1 NUMERO_SIAP = 1 opération de travail.
-- Conservation du nombre de lignes SIAP sources pour audit.
-- Recherche géographique élargie jusqu'à 500 m.
-- Parcelles identiques, adjacentes et proches.
-- SIREN utilisé comme générateur prioritaire de candidats.
-- Scoring séparé : MOA, opération, adresse, rue, numéro de rue, logements, bâtiments, surface, RNB, cadastre.
-- Filtres instantanés et tri croissant/décroissant sur les en-têtes.
-- Une feuille Excel SIAP consolide est incluse dans l'export.
+DEMARRAGE
+Decompresser tout le dossier, puis ouvrir index.html dans Chrome, Edge
+ou Firefox recent. Conserver tous les fichiers ensemble. Pour GitHub Pages,
+deposer le contenu du dossier de l'application au meme niveau que index.html.
+Ne pas deposer les Excel metier dans le depot public.
 
-IMPORTANT
-Le traitement Excel reste dans le navigateur. Une connexion Internet est nécessaire pour charger les bibliothèques CDN et interroger les API publiques IGN/Géoplateforme, RNB et Annuaire des Entreprises.
+Charger le fichier SIAP et le fichier de votre base dans les deux zones.
+Verifier les correspondances de colonnes, notamment Numero SIAP, Adresse,
+Ville, Code postal et ID-RNB lorsqu'il existe. L'ordre des colonnes est libre.
+Lancer le rapprochement V5.1. Le mode diagnostic RNB sans SIAP est conserve.
+
+COTE SIAP
+Chaque adresse distincte est recherchee dans la base d'adresses puis dans
+le RNB. Une reference cadastrale n'est pas obligatoire cote SIAP.
+Les ID-RNB deja presents dans un fichier sont aussi exploites et verifies.
+Les lignes de meme NUMERO_SIAP sont regroupees mais les localisations sont
+conservees et analysees separement. Leurs adresses ne sont jamais concatenees
+pour fabriquer une adresse artificielle a geocoder.
+
+COTE BASE
+Ville / CP / commune / parcelles, adresse precise et ID-RNB fourni sont
+acceptes selon les donnees disponibles. La notice d'origine V5 decrit les
+formats cadastraux, prefixes, listes et parcelles partielles.
+Le modele Excel V5 fourni reste compatible : aucun changement de structure
+n'est impose a vos fichiers existants.
+
+COMPARAISON
+Les RNB retenus de chaque cote sont compares par egalite d'identifiant,
+pas par similarite de texte. Les RNB candidats restent distincts des RNB
+retenus. Tous les candidats sont indexes pour ne pas manquer un lien quand
+plusieurs batiments partagent une adresse.
+Un batiment de la base peut appartenir a une operation SIAP plus large :
+la couverture de la base et celle du SIAP sont affichees separement.
+Une correspondance qui ne couvre qu'une partie des RNB retenus de la base
+n'est jamais validee automatiquement.
+Plusieurs numeros SIAP partageant les RNB de la ligne imposent une validation,
+meme si un candidat obtient un meilleur score textuel.
+Les preuves metier restent necessaires, sauf ID-RNB verifies fournis des
+deux cotes et absence d'ambiguite ou d'alerte. Un RNB n'est pas un numero de
+financement. Les associations automatiques restent des propositions issues
+de regles heuristiques : controlez les resultats avant usage metier.
+
+INTERFACE ET EXPORT
+Le diagnostic affiche les taux d'identification des deux fichiers.
+Preuves / choisir affiche RNB base, RNB SIAP, RNB communs, origine de la
+preuve SIAP et adresses sources concernees. La validation SIAP manuelle et
+la selection RNB manuelle de la ligne de base sont conservees.
+L'export conserve les colonnes originales et ajoute les preuves, couvertures,
+RNB et diagnostics SIAP. Nouveaux onglets :
+- Comparaison RNB : une ligne par couple base / candidat SIAP lie par RNB.
+- Adresses SIAP RNB : une ligne par localisation source distincte cote SIAP.
+Par compatibilite, la feuille principale conserve le nom Rapprochement V5
+et les collisions de colonnes sont suffixees _V5. Le fichier exporte porte
+bien le prefixe Rapprochement_SIAP_EVOLUTION_V5_1.
+Les pourcentages de couverture concernent le nombre d'identifiants RNB
+retenus, pas les surfaces, les logements, ni une probabilite de correspondance.
+
+PRUDENCE ET CONFIDENTIALITE
+Les fichiers sont lus dans le navigateur, non televerses integralement.
+Les champs necessaires aux recherches sont transmis aux API publiques :
+adresses, communes, parcelles, ID-RNB et noms de MOA si la recherche SIREN
+optionnelle est activee. Aucun acces direct au SIAP : seul votre Excel est
+recoupe. Aucune persistence des donnees metier n'a ete ajoutee.
+Exporter avant de fermer ou recharger la page. Internet reste necessaire
+pour charger les bibliotheques tierces et interroger les services.
+
+VERIFICATIONS
+66 tests de logique et 38 controles d'interface reussis sur donnees fictives.
+Voir tests/RESULTATS_TESTS.md. Les API et les bibliotheques d'import/export
+sont simulees dans les tests navigateur. Ce n'est pas une mesure du taux de
+rapprochement sur vos fichiers, ni une validation de disponibilite des API,
+des CDN ou d'un cycle reel Excel dans votre navigateur.
+
+SOURCES TECHNIQUES
+https://rnb-api.beta.gouv.fr/api/alpha/schema/
+https://rnb.beta.gouv.fr/
+https://geo.api.gouv.fr/decoupage-administratif/communes
+https://apicarto.ign.fr/api/doc/cadastre
+https://data.geopf.fr/geocodage/search

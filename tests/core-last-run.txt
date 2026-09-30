@@ -1,0 +1,46 @@
+PASS Postal leading zero
+PASS Postal and INSEE numeric padding
+PASS Corsica INSEE
+PASS Full ID retains absorbed prefix
+PASS Corsica full ID
+PASS No truncated invalid parcel number
+PASS No invented prefix
+PASS Single-letter section normalized
+PASS Excel 4-field layout Code cadastral = section
+PASS Code cadastral = INSEE
+PASS Code cadastral = full ID
+PASS Conflicting INSEE inputs flagged
+PASS Full identifier never split into short numbers
+PASS List and partial parcels
+PASS French ranges
+PASS Explicit section-number pairing
+PASS Single-letter explicit section is not range delimiter
+PASS Ambiguous multiple sections rejected (no Cartesian product)
+PASS Oversized range rejected
+PASS Missing section flagged
+PASS Missing number flagged
+PASS Feature identity with Corsica properties
+PASS Two different absorbed prefixes are distinct
+PASS RNB IDs formatting
+PASS 100/100 ties remain ambiguous
+PASS Unique eligible candidate can be automatic
+PASS Probable never writes NUMERO_SIAP
+PASS One plot one building, precise source
+PASS RNB multi-page fully retained, no arbitrary first building
+PASS Small geometric overlap is not a retained RNB
+PASS Partial parcel never auto-selects unique building
+PASS Two prefixes found: flagged, no auto-financial association
+PASS Explicit prefix filters returned parcels
+PASS No fabricated reference after empty cadastre
+PASS API failure is distinct from no result, not cached
+PASS Successful request cache and deduplication
+PASS Inactive RNB is visible but never selected
+PASS Demolished building excluded
+PASS Plot+exact address disambiguates two buildings
+PASS Postal-only multiple communes never scanned indiscriminately
+PASS Direct RNB conflicts detected
+PASS Cancelled engine stops requests
+PASS Cross-origin pagination rejected
+PASS Cyclic pagination rejected
+
+44/44 tests passed

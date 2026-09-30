@@ -1,0 +1,20 @@
+Initial run disabled
+Header and sheet autodetection
+RNB-only mode enabled
+RNB-only diagnostic present
+Original NUMERO_SIAP not overwritten
+New NUMERO_SIAP suffix preserved
+Original arbitrary column retained
+SIAP consolidation retained
+Tied matches never automatic
+Ambiguous SIAP remains unvalidated
+Candidate export contains both SIAP
+Audit sheets present
+Details dialog opens
+Manual SIAP selection reflected in export
+Manual validation dated
+Manual RNB selection retained after recomputing
+Manual filter works
+Render preserves scroll
+No browser JavaScript errors
+[]

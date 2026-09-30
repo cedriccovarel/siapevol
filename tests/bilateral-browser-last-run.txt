@@ -1,0 +1,19 @@
+Cadastre base to precise SIAP address produces common RNB
+Unique supported building association can be automatic
+Two source RNB columns are exported
+Original columns unchanged
+New comparison and SIAP-address sheets present
+Geocode and RNB address endpoint called
+Proof dialog shows both RNB sets
+Multiple SIAP numbers sharing a RNB block automatic selection
+All overlapping SIAP numbers are exported
+Same SIAP multiple addresses is one operation
+All distinct SIAP source addresses analyzed
+RNB from second SIAP address is retained
+Matched source address, not representative first address, exported
+Building subset of wider SIAP can be supported
+Partial base RNB coverage remains unvalidated
+Ambiguous SIAP address never becomes a retained RNB
+Ambiguous common building remains visible as candidate
+Different entrances of same building can match through RNB
+No browser JavaScript errors

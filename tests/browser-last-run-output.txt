@@ -1,0 +1,21 @@
+PASS Initial run disabled
+PASS Header and sheet autodetection
+PASS RNB-only mode enabled
+PASS RNB-only diagnostic present
+PASS Original NUMERO_SIAP not overwritten
+PASS New NUMERO_SIAP suffix preserved
+PASS Original arbitrary column retained
+PASS SIAP consolidation retained
+PASS Tied matches never automatic
+PASS Ambiguous SIAP remains unvalidated
+PASS Candidate export contains both SIAP
+PASS Audit sheets present
+PASS Details dialog opens
+PASS Manual SIAP selection reflected in export
+PASS Manual validation dated
+PASS Manual RNB selection retained after recomputing
+PASS Manual filter works
+PASS Render preserves scroll
+PASS No browser JavaScript errors
+
+19 browser checks passed (mock API / mock third-party libraries).
